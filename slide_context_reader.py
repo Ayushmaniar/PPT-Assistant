@@ -29,28 +29,59 @@ class PowerPointSlideReader:
             self.ppt_app = None
     
     def get_current_slide_index(self):
-        """Get the index of the currently selected slide."""
+        """Get the index of the currently selected/active slide."""
         try:
             if not self.ppt_app:
                 return None
             
-            # Get the active window and current slide
+            # Get the active window
             active_window = self.ppt_app.ActiveWindow
-            if hasattr(active_window, 'Selection') and hasattr(active_window.Selection, 'SlideRange'):
-                # If slides are selected in slide sorter or normal view
-                if active_window.Selection.SlideRange.Count > 0:
+            
+            # Method 1: Try to get from the current view (most reliable for normal view)
+            try:
+                if hasattr(active_window, 'View') and hasattr(active_window.View, 'Slide'):
+                    slide_index = active_window.View.Slide.SlideIndex
+                    if slide_index > 0:  # Valid slide index
+                        return slide_index
+            except:
+                pass
+            
+            # Method 2: Try to get from selection (works in slide sorter view)
+            try:
+                if (hasattr(active_window, 'Selection') and 
+                    hasattr(active_window.Selection, 'SlideRange') and
+                    active_window.Selection.SlideRange.Count > 0):
                     return active_window.Selection.SlideRange[0].SlideIndex
+            except:
+                pass
             
-            # Alternative method: get from slide show or normal view
-            if hasattr(active_window, 'View') and hasattr(active_window.View, 'Slide'):
-                return active_window.View.Slide.SlideIndex
+            # Method 3: Try to get from active pane (works in some views)
+            try:
+                if hasattr(active_window, 'ActivePane') and hasattr(active_window.ActivePane, 'View'):
+                    pane_view = active_window.ActivePane.View
+                    if hasattr(pane_view, 'Slide'):
+                        return pane_view.Slide.SlideIndex
+            except:
+                pass
             
-            # Fallback: assume first slide
-            return 1
+            # Method 4: Try SlideShowWindow if in slideshow mode
+            try:
+                if hasattr(self.ppt_app, 'SlideShowWindows') and self.ppt_app.SlideShowWindows.Count > 0:
+                    slide_show = self.ppt_app.SlideShowWindows(1)
+                    if hasattr(slide_show, 'View') and hasattr(slide_show.View, 'CurrentShowPosition'):
+                        return slide_show.View.CurrentShowPosition
+            except:
+                pass
+            
+            # Fallback: return 1 if presentation exists
+            if self.presentation and self.presentation.Slides.Count > 0:
+                return 1
+            
+            return None
             
         except Exception as e:
             print(f"Error getting current slide index: {e}")
-            return 1
+            return 1  # Safe fallback
     
     def analyze_shape(self, shape):
         """Analyze a single shape and extract its properties."""
@@ -359,15 +390,25 @@ Last Updated: {slide_info['timestamp']}
             print(f"\n❌ Error during monitoring: {e}")
     
     def get_current_context(self):
-        """Get the current slide context."""
-        if self.current_slide_index is None:
+        """Get the current slide context. Always checks for slide changes."""
+        try:
+            # Always get the current slide index to detect changes
             current_slide = self.get_current_slide_index()
-            if current_slide:
+            
+            if current_slide is None:
+                return "Could not determine current slide"
+            
+            # Check if the slide has changed or if we don't have cached context
+            if current_slide != self.current_slide_index or not self.current_slide_context:
+                print(f"🔄 Slide context updating: {self.current_slide_index} → {current_slide}")
                 self.current_slide_index = current_slide
                 slide_info = self.read_slide_content(current_slide)
                 self.current_slide_context = self.format_slide_context(slide_info)
-        
-        return self.current_slide_context
+            
+            return self.current_slide_context
+            
+        except Exception as e:
+            return f"Error getting current context: {e}"
 
 
 def test_slide_reader():

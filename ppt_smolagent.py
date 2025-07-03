@@ -136,6 +136,8 @@ def get_current_slide_context():
     try:
         reader = get_slide_reader()
         if reader and reader.ppt_app:
+            # Force refresh of context by clearing cached values
+            # This ensures we always get the latest slide when user switches
             context = reader.get_current_context()
             return context if context else "No slide context available"
         else:
@@ -176,6 +178,12 @@ def run_agent_with_code_capture(message):
     try:
         # Get current slide context
         slide_context = get_current_slide_context()
+        
+        # Debug: Print current slide info (you can remove this later)
+        if "Slide:" in slide_context:
+            slide_line = [line for line in slide_context.split('\n') if line.startswith('Slide:')]
+            if slide_line:
+                print(f"🎯 Current slide context: {slide_line[0]}")
         
         # Enhance the message with slide context
         enhanced_message = f"""CURRENT SLIDE CONTEXT:
