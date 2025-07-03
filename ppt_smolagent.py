@@ -94,8 +94,8 @@ USE THIS CONTEXT to make informed decisions about:
 - Whether modifications should be made to existing elements vs. adding new ones
 
 CODE FORMATTING REQUIREMENTS:
-- ALWAYS write code between triple backticks (```) 
-- NEVER EVER use other code formatting like <code></code>, single backticks, or any other format
+- ALWAYS write code between <code>(.*?)</code> 
+- NEVER EVER use other code formatting.
 
 General PowerPoint Concepts:
 - A PowerPoint presentation is a `.pptx` file containing one or more slides.
