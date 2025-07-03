@@ -243,10 +243,52 @@ class PPTAssistant:
         # Always try to use the active presentation if available
         if self.ppt_app.Presentations.Count > 0:
             self.presentation = self.ppt_app.ActivePresentation
+        
+        # NEW: Ensure a slide is selected (fallback to last slide)
+        self.select_default_slide()
+
+    def select_default_slide(self):
+        """Ensure there is always an active slide selection.
+        If a new presentation has no slides, create a blank one and select it.
+        If slides exist but none is selected, select the last slide by default.
+        """
+        if not self.presentation:
+            return
+
+        # If the presentation has no slides, add a blank slide and select it
+        if self.presentation.Slides.Count == 0:
+            # 12 corresponds to ppLayoutBlank
+            self.presentation.Slides.Add(1, 12)
+            try:
+                self.ppt_app.ActiveWindow.View.GotoSlide(1)
+            except Exception:
+                pass
+            return
+
+        # Check if a slide is currently selected/active
+        try:
+            _ = self.ppt_app.ActiveWindow.View.Slide.SlideIndex  # Accessing raises if no slide
+            return  # Slide is already selected, no further action needed
+        except Exception:
+            pass  # No active slide, fall through to select last slide
+
+        # Select the last slide as a sensible default
+        last_idx = self.presentation.Slides.Count
+        try:
+            self.ppt_app.ActiveWindow.View.GotoSlide(last_idx)
+        except Exception:
+            # In some views (e.g., slide sorter), GotoSlide may not work. Fallback to selection API.
+            try:
+                slide_range = self.presentation.Slides(last_idx)
+                slide_range.Select()
+            except Exception:
+                pass
 
     def create_new_ppt(self):
         self.ensure_ppt()
         self.presentation = self.ppt_app.Presentations.Add()
+        # Ensure the new presentation has a first slide selected
+        self.select_default_slide()
         self.log("[System] New PowerPoint presentation created.")
 
     def open_ppt(self):
@@ -254,6 +296,8 @@ class PPTAssistant:
         file_path = filedialog.askopenfilename(filetypes=[("PowerPoint Files", "*.pptx;*.ppt")])
         if file_path:
             self.presentation = self.ppt_app.Presentations.Open(file_path)
+            # Ensure a slide is selected in the newly opened presentation
+            self.select_default_slide()
             self.log(f"[System] Opened presentation: {file_path}")
 
     def send_message(self):
