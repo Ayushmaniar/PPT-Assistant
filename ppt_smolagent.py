@@ -24,7 +24,7 @@ model = OpenAIServerModel(
 
 # Tool to add a textbox to a PowerPoint slide
 @tool
-def add_textbox_tool(slide_idx: int = 1, text: str = "Sample Text", left: int = 100, top: int = 100, width: int = 400, height: int = 50, font_size: int = None, font_name: str = None, font_bold: bool = None, font_italic: bool = None) -> str:
+def add_textbox_tool(slide_idx: int = 1, text: str = "Sample Text", left: int = 100, top: int = 100, width: int = 400, height: int = 50, font_size: int = None, font_name: str = None, font_bold: bool = None, font_italic: bool = None, text_align: str = "left") -> str:
     """
     Add a textbox to a PowerPoint slide with customizable text and formatting.
     
@@ -39,6 +39,7 @@ def add_textbox_tool(slide_idx: int = 1, text: str = "Sample Text", left: int = 
         font_name: Font name for the text (optional)
         font_bold: Whether to make the text bold (optional)
         font_italic: Whether to make the text italic (optional)
+        text_align: Text alignment - "left", "center", or "right" (default: "left")
     
     Returns:
         str: Confirmation message of the textbox addition
@@ -61,6 +62,18 @@ def add_textbox_tool(slide_idx: int = 1, text: str = "Sample Text", left: int = 
         box.TextFrame.TextRange.Font.Bold = -1 if font_bold else 0
     if font_italic is not None:
         box.TextFrame.TextRange.Font.Italic = -1 if font_italic else 0
+    
+    # Set text alignment
+    # PowerPoint alignment constants: 1 = left, 2 = center, 3 = right
+    alignment_map = {
+        "left": 1,
+        "center": 2, 
+        "right": 3
+    }
+    
+    if text_align.lower() in alignment_map:
+        box.TextFrame.TextRange.ParagraphFormat.Alignment = alignment_map[text_align.lower()]
+    
     return f"Textbox added to slide {slide_idx} with text: {text}"
 
 # The tool is automatically registered when using the @tool decorator
