@@ -94,6 +94,7 @@ class PowerPointSlideReader:
                 'width': round(shape.Width, 2),
                 'height': round(shape.Height, 2),
                 'visible': shape.Visible,
+                'id': shape.Id
             }
             
             # Text content
@@ -318,6 +319,7 @@ Last Updated: {slide_info['timestamp']}
                 context += f"Type: {shape['type']}\n"
                 context += f"Position: ({shape.get('left', 'N/A')}, {shape.get('top', 'N/A')})\n"
                 context += f"Size: {shape.get('width', 'N/A')} x {shape.get('height', 'N/A')}\n"
+                context += f"ID: {shape['id']}\n"
                 
                 if 'text' in shape:
                     context += f"Text: {shape['text'][:100]}{'...' if len(shape['text']) > 100 else ''}\n"
