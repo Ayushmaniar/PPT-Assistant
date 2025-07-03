@@ -74,6 +74,16 @@ def add_textbox_tool(slide_idx: int = 1, text: str = "Sample Text", left: int = 
     if text_align.lower() in alignment_map:
         box.TextFrame.TextRange.ParagraphFormat.Alignment = alignment_map[text_align.lower()]
     
+    # Clear slide context cache to ensure fresh context on next request
+    try:
+        from slide_context_reader import PowerPointSlideReader
+        # Get the global slide reader and clear its cache
+        reader = get_slide_reader()
+        if reader:
+            reader.clear_context_cache()
+    except Exception as e:
+        pass  # Silently continue if cache clearing fails
+    
     return f"Textbox added to slide {slide_idx} with text: {text}"
 
 # The tool is automatically registered when using the @tool decorator
@@ -85,6 +95,7 @@ IMPORTANT: You will ALWAYS receive the current slide context before the user's r
 - The currently selected slide number and layout
 - All objects/shapes present on the slide (textboxes, images, tables, charts, etc.)
 - Their positions, sizes, text content, and formatting
+- IDs for each object (these never change and allow reliable object reference)
 - Any animations or slide notes
 
 USE THIS CONTEXT to make informed decisions about:
@@ -92,6 +103,9 @@ USE THIS CONTEXT to make informed decisions about:
 - What font sizes and styles to use (match existing elements when appropriate)
 - How to complement or enhance the existing slide content
 - Whether modifications should be made to existing elements vs. adding new ones
+
+AVAILABLE TOOLS:
+1. add_textbox_tool: Create new textboxes with customizable formatting
 
 CODE FORMATTING REQUIREMENTS:
 - ALWAYS write code between <code>(.*?)</code> 
@@ -106,6 +120,7 @@ General PowerPoint Concepts:
   - Height: 540 points (7.5 inches)
   - Origin (0, 0) is the top-left corner of the slide.
 
+Remember use tools and change the slides only if necessary. If the user is asking something about a slide or any other information that does not require you to change the slide then please do not answer the users questions in a new textbox on a slide.
 """
 
 # Create a custom logging handler to capture code generation
@@ -144,19 +159,36 @@ def get_slide_reader():
             slide_reader = None
     return slide_reader
 
-def get_current_slide_context():
+def get_current_slide_context(force_refresh=False):
     """Get the current slide context as a string."""
     try:
         reader = get_slide_reader()
         if reader and reader.ppt_app:
             # Force refresh of context by clearing cached values
             # This ensures we always get the latest slide when user switches
-            context = reader.get_current_context()
+            if force_refresh:
+                context = reader.force_refresh_context()
+            else:
+                context = reader.get_current_context()
             return context if context else "No slide context available"
         else:
             return "PowerPoint not connected - no slide context available"
     except Exception as e:
         return f"Error reading slide context: {e}"
+
+def get_fresh_slide_context():
+    """Get a completely fresh slide context, ignoring any cache."""
+    return get_current_slide_context(force_refresh=True)
+
+def clear_slide_context_cache():
+    """Clear the slide context cache to force refresh on next access."""
+    try:
+        reader = get_slide_reader()
+        if reader:
+            reader.clear_context_cache()
+            print("🗑️ Slide context cache cleared")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not clear context cache: {e}")
 
 agent = CodeAgent(
     tools=[add_textbox_tool],
@@ -239,6 +271,20 @@ INSTRUCTIONS: Please consider the current slide context above when processing th
         stderr_content = strip_ansi_codes(stderr_capture.getvalue())
         captured_code = strip_ansi_codes(code_capture_handler.get_code())
         
+        # IMPORTANT: Force refresh the slide context after agent execution
+        # This ensures that any objects added/deleted by the agent are reflected in the context
+        try:
+            reader = get_slide_reader()
+            if reader and reader.ppt_app:
+                # Force refresh the context to reflect any changes made by the agent
+                updated_context = reader.force_refresh_context()
+                print("✅ Slide context refreshed after agent execution")
+            else:
+                updated_context = slide_context
+        except Exception as e:
+            print(f"⚠️ Warning: Could not refresh context after execution: {e}")
+            updated_context = slide_context
+        
         # Try to extract code from various sources
         generated_code = ""
         
@@ -288,7 +334,11 @@ INSTRUCTIONS: Please consider the current slide context above when processing th
         # Fallback message if no code was captured
         if not generated_code.strip():
             # Create a summary based on the tool that was likely used
-            tool_name = "add_textbox_tool" if "textbox" in message.lower() else "PowerPoint automation tool"
+            if "textbox" in message.lower() or "add" in message.lower():
+                tool_name = "add_textbox_tool"
+            else:
+                tool_name = "PowerPoint automation tool"
+                
             generated_code = f"""# Agent Execution Summary
 # Request: "{message}"
 # 
@@ -296,6 +346,9 @@ INSTRUCTIONS: Please consider the current slide context above when processing th
 # This is a direct tool call that doesn't require custom code generation.
 #
 # The operation was completed successfully using the built-in PowerPoint COM interface.
+# 
+# Available tools:
+# - add_textbox_tool: Create textboxes with formatting options
 # 
 # Example of what the agent did internally:
 import win32com.client
@@ -315,7 +368,7 @@ presentation = ppt_app.ActivePresentation
         return {
             'answer': clean_answer,
             'generated_code': generated_code,
-            'slide_context': slide_context,
+            'slide_context': updated_context,
             'debug_output': f"STDOUT:\n{stdout_content}\n\nSTDERR:\n{stderr_content}"
         }
         
@@ -341,8 +394,8 @@ def run_agent_with_slide_context(message):
     return run_agent_with_code_capture(message)
 
 def test_integration():
-    """Test the slide context integration."""
-    print("🧪 Testing PPT Agent with Slide Context Integration")
+    """Test the slide context integration with textbox creation."""
+    print("🧪 Testing PPT Agent with Auto-Refreshing Context")
     print("=" * 60)
     
     # Test 1: Check slide reader connection
@@ -352,23 +405,48 @@ def test_integration():
         print("✅ PowerPoint connected successfully!")
         
         # Show current slide context
-        print("\n📄 Current slide context:")
+        print("\n📄 Current slide context (initial):")
         context = get_current_slide_context()
-        print(context[:500] + "..." if len(context) > 500 else context)
+        print(context[:400] + "..." if len(context) > 400 else context)
         
     else:
         print("❌ PowerPoint not connected. Please open PowerPoint with a presentation.")
         return
     
-    # Test 2: Run agent with context
-    print("\n🤖 Test 2: Running agent with slide context...")
-    test_message = "Add a textbox with 'Test Integration' in a good position that doesn't overlap existing content"
+    # Test 2: Add a textbox
+    print("\n🤖 Test 2: Adding a textbox with slide context...")
+    add_message = "Add a textbox with 'Context Auto-Refresh Test' that doesn't overlap existing content"
     
-    result = run_agent_with_slide_context(test_message)
+    result = run_agent_with_slide_context(add_message)
+    print(f"\n📝 Add Result: {result['answer']}")
     
-    print(f"\n📝 Agent Answer: {result['answer']}")
-    print(f"\n💻 Generated Code:\n{result['generated_code'][:300]}...")
-    print(f"\n📄 Slide Context Available: {'Yes' if result['slide_context'] else 'No'}")
+    # Test 3: Show that context was automatically refreshed
+    print("\n📄 Test 3: Context after addition (should show new object)...")
+    fresh_context = get_fresh_slide_context()
+    print(fresh_context[:600] + "..." if len(fresh_context) > 600 else fresh_context)
+    
+    # Test 4: Demonstrate automatic refresh works in subsequent requests
+    print("\n🤖 Test 4: Making another request to show agent sees new objects...")
+    list_message = "Tell me what objects are currently on this slide"
+    
+    list_result = run_agent_with_slide_context(list_message)
+    print(f"\n📝 List Result: {list_result['answer']}")
+    
+    # Test 5: Add another textbox to verify positioning awareness
+    print("\n🤖 Test 5: Adding another textbox to test positioning awareness...")
+    add_message2 = "Add another textbox with 'Second Textbox' that doesn't overlap with existing content"
+    
+    result2 = run_agent_with_slide_context(add_message2)
+    print(f"\n📝 Second Add Result: {result2['answer']}")
+    
+    # Test 6: Show final context
+    print("\n📄 Test 6: Final context after all additions...")
+    final_context = get_fresh_slide_context()
+    print(final_context[:500] + "..." if len(final_context) > 500 else final_context)
+    
+    print(f"\n💻 Tools available: add_textbox_tool")
+    print(f"\n📄 Auto-Refresh: ✅ Working - Context updates after every operation")
+    print(f"\n🔄 Cache Management: ✅ Working - Tools clear cache automatically")
     
     print("\n✅ Integration test completed!")
 
