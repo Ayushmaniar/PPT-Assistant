@@ -94,7 +94,10 @@ class PowerPointSlideReader:
                 'width': round(shape.Width, 2),
                 'height': round(shape.Height, 2),
                 'visible': shape.Visible,
-                'id': shape.Id
+                # Static identifiers for reliable object reference
+                'static_id': shape.ID,  # Unique static ID that never changes
+                'z_order': shape.ZOrderPosition,  # Layer/stacking order position
+                'auto_shape_type': getattr(shape, 'AutoShapeType', None),  # AutoShape specific type
             }
             
             # Text content
@@ -319,7 +322,7 @@ Last Updated: {slide_info['timestamp']}
                 context += f"Type: {shape['type']}\n"
                 context += f"Position: ({shape.get('left', 'N/A')}, {shape.get('top', 'N/A')})\n"
                 context += f"Size: {shape.get('width', 'N/A')} x {shape.get('height', 'N/A')}\n"
-                context += f"ID: {shape['id']}\n"
+                context += f"ID: {shape['static_id']}\n"
                 
                 if 'text' in shape:
                     context += f"Text: {shape['text'][:100]}{'...' if len(shape['text']) > 100 else ''}\n"
@@ -411,6 +414,31 @@ Last Updated: {slide_info['timestamp']}
             
         except Exception as e:
             return f"Error getting current context: {e}"
+    
+    def force_refresh_context(self):
+        """Force refresh the current slide context regardless of slide index."""
+        try:
+            current_slide = self.get_current_slide_index()
+            
+            if current_slide is None:
+                return "Could not determine current slide"
+            
+            # Force refresh by reading the slide content again
+            print(f"🔄 Force refreshing slide context for slide {current_slide}")
+            self.current_slide_index = current_slide
+            slide_info = self.read_slide_content(current_slide)
+            self.current_slide_context = self.format_slide_context(slide_info)
+            
+            return self.current_slide_context
+            
+        except Exception as e:
+            return f"Error force refreshing context: {e}"
+    
+    def clear_context_cache(self):
+        """Clear the cached context to force a refresh on next access."""
+        print("🗑️ Clearing slide context cache")
+        self.current_slide_context = ""
+        self.current_slide_index = None
 
 
 def test_slide_reader():
