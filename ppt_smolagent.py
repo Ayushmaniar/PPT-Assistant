@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import logging
 import io
 import sys
+from slide_context_reader import PowerPointSlideReader
 
 # Load environment variables from .env file
 load_dotenv()
@@ -67,6 +68,18 @@ def add_textbox_tool(slide_idx: int = 1, text: str = "Sample Text", left: int = 
 instructions = """
 You are a highly capable AI assistant that writes Python code to automate Microsoft PowerPoint presentations using the tools provided to you.
 
+IMPORTANT: You will ALWAYS receive the current slide context before the user's request. This context contains detailed information about:
+- The currently selected slide number and layout
+- All objects/shapes present on the slide (textboxes, images, tables, charts, etc.)
+- Their positions, sizes, text content, and formatting
+- Any animations or slide notes
+
+USE THIS CONTEXT to make informed decisions about:
+- Where to position new elements (avoid overlapping existing content)
+- What font sizes and styles to use (match existing elements when appropriate)
+- How to complement or enhance the existing slide content
+- Whether modifications should be made to existing elements vs. adding new ones
+
 CODE FORMATTING REQUIREMENTS:
 - ALWAYS write code between triple backticks (```) 
 - NEVER EVER use other code formatting like <code></code>, single backticks, or any other format
@@ -104,6 +117,32 @@ class CodeCaptureHandler(logging.Handler):
 # Global code capture handler
 code_capture_handler = CodeCaptureHandler()
 
+# Global slide context reader instance
+slide_reader = None
+
+def get_slide_reader():
+    """Get or create the global slide reader instance."""
+    global slide_reader
+    if slide_reader is None:
+        try:
+            slide_reader = PowerPointSlideReader()
+        except Exception as e:
+            print(f"Warning: Could not initialize slide reader: {e}")
+            slide_reader = None
+    return slide_reader
+
+def get_current_slide_context():
+    """Get the current slide context as a string."""
+    try:
+        reader = get_slide_reader()
+        if reader and reader.ppt_app:
+            context = reader.get_current_context()
+            return context if context else "No slide context available"
+        else:
+            return "PowerPoint not connected - no slide context available"
+    except Exception as e:
+        return f"Error reading slide context: {e}"
+
 agent = CodeAgent(
     tools=[add_textbox_tool],
     instructions=instructions,
@@ -129,11 +168,24 @@ def strip_ansi_codes(text):
 def run_agent_with_code_capture(message):
     """
     Run the agent and capture both the final answer and generated code.
+    Automatically includes current slide context in the message.
     
     Returns:
-        dict: Contains 'answer' and 'generated_code' keys
+        dict: Contains 'answer', 'generated_code', and 'slide_context' keys
     """
     try:
+        # Get current slide context
+        slide_context = get_current_slide_context()
+        
+        # Enhance the message with slide context
+        enhanced_message = f"""CURRENT SLIDE CONTEXT:
+{slide_context}
+
+USER REQUEST:
+{message}
+
+INSTRUCTIONS: Please consider the current slide context above when processing the user's request. If the user is asking to modify, add to, or work with the current slide, use the context information to make informed decisions about positioning, styling, and content placement."""
+        
         # Clear previous captured code
         code_capture_handler.clear()
         
@@ -152,8 +204,8 @@ def run_agent_with_code_capture(message):
             sys.stdout = stdout_capture
             sys.stderr = stderr_capture
             
-            # Run the agent
-            answer = agent.run(message)
+            # Run the agent with enhanced message
+            answer = agent.run(enhanced_message)
             
         finally:
             # Restore stdout/stderr
@@ -242,6 +294,7 @@ presentation = ppt_app.ActivePresentation
         return {
             'answer': clean_answer,
             'generated_code': generated_code,
+            'slide_context': slide_context,
             'debug_output': f"STDOUT:\n{stdout_content}\n\nSTDERR:\n{stderr_content}"
         }
         
@@ -249,9 +302,58 @@ presentation = ppt_app.ActivePresentation
         return {
             'answer': f"Error: {str(e)}",
             'generated_code': f"# Error occurred during execution:\n# {str(e)}\n\n# This might be due to:\n# - Missing dependencies\n# - PowerPoint not running\n# - Invalid parameters",
+            'slide_context': "Error reading slide context",
             'debug_output': str(e)
         }
 
+def run_agent_with_slide_context(message):
+    """
+    Convenience function to run the agent with slide context.
+    This is the main function that external code should call.
+    
+    Args:
+        message (str): The user's request/message
+        
+    Returns:
+        dict: Contains 'answer', 'generated_code', 'slide_context', and 'debug_output'
+    """
+    return run_agent_with_code_capture(message)
+
+def test_integration():
+    """Test the slide context integration."""
+    print("🧪 Testing PPT Agent with Slide Context Integration")
+    print("=" * 60)
+    
+    # Test 1: Check slide reader connection
+    print("\n📡 Test 1: Checking PowerPoint connection...")
+    reader = get_slide_reader()
+    if reader and reader.ppt_app:
+        print("✅ PowerPoint connected successfully!")
+        
+        # Show current slide context
+        print("\n📄 Current slide context:")
+        context = get_current_slide_context()
+        print(context[:500] + "..." if len(context) > 500 else context)
+        
+    else:
+        print("❌ PowerPoint not connected. Please open PowerPoint with a presentation.")
+        return
+    
+    # Test 2: Run agent with context
+    print("\n🤖 Test 2: Running agent with slide context...")
+    test_message = "Add a textbox with 'Test Integration' in a good position that doesn't overlap existing content"
+    
+    result = run_agent_with_slide_context(test_message)
+    
+    print(f"\n📝 Agent Answer: {result['answer']}")
+    print(f"\n💻 Generated Code:\n{result['generated_code'][:300]}...")
+    print(f"\n📄 Slide Context Available: {'Yes' if result['slide_context'] else 'No'}")
+    
+    print("\n✅ Integration test completed!")
+
 if __name__ == "__main__":
-    # Example: agent.run("Add a textbox with text 'Hello' on slide 2, font size 32, bold.")
-    print(agent.run("Add a textbox with text 'Hello' on slide 2, font size 32, bold."))
+    # Test the integration
+    test_integration()
+    
+    # Original example (still works)
+    # print(agent.run("Add a textbox with text 'Hello' on slide 2, font size 32, bold."))

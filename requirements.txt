@@ -1,3 +1,6 @@
 pywin32
 smolagents[toolkit]
+smolagents[openai]
 huggingface_hub
+win32com
+python-dotenv
