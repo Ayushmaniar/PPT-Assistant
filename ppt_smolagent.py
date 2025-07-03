@@ -76,6 +76,154 @@ def add_textbox_tool(slide_idx: int = 1, text: str = "Sample Text", left: int = 
     
     return f"Textbox added to slide {slide_idx} with text: {text}"
 
+# Universal object manipulation tools
+@tool
+def move_object(id: int, left: int, top: int) -> str:
+    """
+    Move any object by ID to new coordinates.
+
+    Args:
+        id (int): The ID of the object to move.
+        left (int): New left position in points.
+        top (int): New top position in points.
+
+    Returns:
+        str: Confirmation message of the move operation.
+    """
+    import win32com.client, pythoncom
+    pythoncom.CoInitialize()
+    ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+    presentation = ppt_app.ActivePresentation
+    for slide in presentation.Slides:
+        for shape in slide.Shapes:
+            if shape.Id == id:
+                shape.Left = left
+                shape.Top = top
+                return f"Moved object {id} to ({left}, {top}) on slide {slide.SlideIndex}"
+    return f"Shape with id {id} not found"
+
+@tool
+def resize_object(id: int, width: int, height: int) -> str:
+    """
+    Resize any object by ID to new dimensions.
+
+    Args:
+        id (int): The ID of the object to resize.
+        width (int): New width in points.
+        height (int): New height in points.
+
+    Returns:
+        str: Confirmation message of the resize operation.
+    """
+    import win32com.client, pythoncom
+    pythoncom.CoInitialize()
+    ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+    presentation = ppt_app.ActivePresentation
+    for slide in presentation.Slides:
+        for shape in slide.Shapes:
+            if shape.Id == id:
+                shape.Width = width
+                shape.Height = height
+                return f"Resized object {id} to ({width}x{height}) on slide {slide.SlideIndex}"
+    return f"Shape with id {id} not found"
+
+
+@tool
+def get_object_properties(id: int) -> dict:
+    """
+    Return properties of an object by ID.
+
+    Args:
+        id (int): The ID of the object to inspect.
+
+    Returns:
+        dict: A dictionary of object properties or error message.
+    """
+    import win32com.client, pythoncom
+    pythoncom.CoInitialize()
+    ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+    presentation = ppt_app.ActivePresentation
+    for slide in presentation.Slides:
+        for shape in slide.Shapes:
+            if shape.Id == id:
+                props = {
+                    "slide": slide.SlideIndex,
+                    "id": shape.Id,
+                    "name": shape.Name,
+                    "left": shape.Left,
+                    "top": shape.Top,
+                    "width": shape.Width,
+                    "height": shape.Height,
+                    "rotation": shape.Rotation,
+                    "type": shape.Type
+                }
+                return props
+    return {"error": f"Shape with id {id} not found"}
+
+@tool
+def duplicate_object(id: int, target_slide_idx: int = None) -> int:
+    """
+    Duplicate object by ID, optionally to another slide.
+
+    Args:
+        id (int): The ID of the object to duplicate.
+        target_slide_idx (int, optional): Slide index to duplicate onto. Defaults to same slide.
+
+    Returns:
+        int: The new object's ID, or -1 if failed.
+    """
+    import win32com.client, pythoncom
+    pythoncom.CoInitialize()
+    ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+    presentation = ppt_app.ActivePresentation
+    source_shape = None
+    for slide in presentation.Slides:
+        for shape in slide.Shapes:
+            if shape.Id == id:
+                source_slide = slide
+                source_shape = shape
+                break
+        if source_shape:
+            break
+    if not source_shape:
+        return -1
+    # Duplicate on same slide if no target specified or same slide
+    if not target_slide_idx or source_slide.SlideIndex == target_slide_idx:
+        dup = source_shape.Duplicate()
+        new_id = dup[0].Id if dup else -1
+        return new_id
+    # Copy/paste to target slide
+    source_shape.Copy()
+    if presentation.Slides.Count < target_slide_idx:
+        target_slide = presentation.Slides.Add(target_slide_idx, 12)
+    else:
+        target_slide = presentation.Slides(target_slide_idx)
+    pasted = target_slide.Shapes.Paste()
+    new_id = pasted[0].Id if pasted else -1
+    return new_id
+
+@tool
+def delete_object(id: int) -> str:
+    """
+    Delete object by ID.
+
+    Args:
+        id (int): The ID of the object to delete.
+
+    Returns:
+        str: Confirmation message of deletion.
+    """
+    import win32com.client, pythoncom
+    pythoncom.CoInitialize()
+    ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+    presentation = ppt_app.ActivePresentation
+    for slide in presentation.Slides:
+        for shape in slide.Shapes:
+            if shape.Id == id:
+                shape.Delete()
+                return f"Deleted object {id} on slide {slide.SlideIndex}"
+    return f"Shape with id {id} not found"
+
 # The tool is automatically registered when using the @tool decorator
 
 instructions = """
@@ -159,7 +307,15 @@ def get_current_slide_context():
         return f"Error reading slide context: {e}"
 
 agent = CodeAgent(
-    tools=[add_textbox_tool],
+    tools=[
+        add_textbox_tool,
+        move_object,
+        resize_object,
+        rotate_object,
+        get_object_properties,
+        duplicate_object,
+        delete_object
+    ],
     instructions=instructions,
     max_steps=3,
     model=model,
