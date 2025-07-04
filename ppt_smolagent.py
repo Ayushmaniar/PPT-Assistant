@@ -17,7 +17,7 @@ if not openai_api_key:
 
 # Define the model using OpenAIServerModel
 model = OpenAIServerModel(
-    model_id="gpt-4o-mini",
+    model_id="gpt-4.1-nano",
     api_key=openai_api_key,
     api_base = "https://api.openai.com/v1"
 )
@@ -85,6 +85,214 @@ def add_textbox_tool(slide_idx: int = 1, text: str = "Sample Text", left: int = 
         pass  # Silently continue if cache clearing fails
     
     return f"Textbox added to slide {slide_idx} with text: {text}"
+
+@tool
+def update_textbox_tool(id: int, text: str = None, text_operation: str = "replace", start_char: int = None, end_char: int = None, font_size: int = None, font_name: str = None, font_bold: bool = None, font_italic: bool = None, font_underline: bool = None, font_strikethrough: bool = None, font_color: str = None, background_color: str = None, text_align: str = None, line_spacing: float = None, char_spacing: float = None, left_margin: float = None, right_margin: float = None, top_margin: float = None, bottom_margin: float = None) -> str:
+    """
+    Update text content and formatting properties of an existing textbox by ID.
+    
+    Args:
+        id: The ID of the textbox to update
+        text: New text content (optional)
+        text_operation: How to apply text - "replace", "append", or "prepend" (default: "replace")
+        start_char: Start character position for range formatting (1-indexed, optional)
+        end_char: End character position for range formatting (1-indexed, optional)
+        font_size: Font size in points (optional)
+        font_name: Font name (optional)
+        font_bold: Whether text should be bold (optional)
+        font_italic: Whether text should be italic (optional)
+        font_underline: Whether text should be underlined (optional)
+        font_strikethrough: Whether text should have strikethrough (optional)
+        font_color: Font color in hex format like "#FF0000" for red (optional)
+        background_color: Background color in hex format (optional)
+        text_align: Text alignment - "left", "center", "right", or "justify" (optional)
+        line_spacing: Line spacing multiplier (1.0 = single, 1.5 = 1.5x, etc.) (optional)
+        char_spacing: Character spacing in points (optional)
+        left_margin: Left margin in points (optional)
+        right_margin: Right margin in points (optional)
+        top_margin: Top margin in points (optional)
+        bottom_margin: Bottom margin in points (optional)
+    
+    Returns:
+        str: Confirmation message with details of what was updated
+    """
+    import win32com.client, pythoncom
+    pythoncom.CoInitialize()
+    
+    try:
+        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+        presentation = ppt_app.ActivePresentation
+        
+        # Find the textbox by ID
+        target_shape = None
+        target_slide = None
+        
+        for slide in presentation.Slides:
+            for shape in slide.Shapes:
+                if shape.Id == id:
+                    target_shape = shape
+                    target_slide = slide
+                    break
+            if target_shape:
+                break
+        
+        if not target_shape:
+            return f"Shape with ID {id} not found"
+        
+        # Verify it's a shape that can contain text
+        if not hasattr(target_shape, 'TextFrame'):
+            return f"Shape with ID {id} is not a textbox or doesn't support text"
+        
+        if not target_shape.TextFrame.HasText and not text:
+            return f"Shape with ID {id} has no text and no new text provided"
+        
+        updates_made = []
+        
+        # Handle text content updates
+        if text is not None:
+            current_text = target_shape.TextFrame.TextRange.Text if target_shape.TextFrame.HasText else ""
+            
+            if text_operation == "replace":
+                target_shape.TextFrame.TextRange.Text = text
+                updates_made.append(f"replaced text with '{text}'")
+            elif text_operation == "append":
+                new_text = current_text + text
+                target_shape.TextFrame.TextRange.Text = new_text
+                updates_made.append(f"appended '{text}'")
+            elif text_operation == "prepend":
+                new_text = text + current_text
+                target_shape.TextFrame.TextRange.Text = new_text
+                updates_made.append(f"prepended '{text}'")
+        
+        # Determine which text range to format
+        if start_char is not None and end_char is not None:
+            # Format specific character range
+            if target_shape.TextFrame.HasText:
+                text_length = len(target_shape.TextFrame.TextRange.Text)
+                start_pos = max(1, min(start_char, text_length))
+                end_pos = max(start_pos, min(end_char, text_length))
+                text_range = target_shape.TextFrame.TextRange.Characters(start_pos, end_pos - start_pos + 1)
+                range_desc = f"characters {start_pos}-{end_pos}"
+            else:
+                return f"Cannot format character range - textbox has no text"
+        else:
+            # Format entire text
+            text_range = target_shape.TextFrame.TextRange
+            range_desc = "entire text"
+        
+        # Apply font formatting
+        if font_size is not None:
+            text_range.Font.Size = font_size
+            updates_made.append(f"set font size to {font_size} for {range_desc}")
+        
+        if font_name is not None:
+            text_range.Font.Name = font_name
+            updates_made.append(f"set font to '{font_name}' for {range_desc}")
+        
+        if font_bold is not None:
+            text_range.Font.Bold = -1 if font_bold else 0
+            updates_made.append(f"set bold to {font_bold} for {range_desc}")
+        
+        if font_italic is not None:
+            text_range.Font.Italic = -1 if font_italic else 0
+            updates_made.append(f"set italic to {font_italic} for {range_desc}")
+        
+        if font_underline is not None:
+            text_range.Font.Underline = -1 if font_underline else 0
+            updates_made.append(f"set underline to {font_underline} for {range_desc}")
+        
+        # Note: Strikethrough might not be available in all PowerPoint versions
+        try:
+            if font_strikethrough is not None:
+                text_range.Font.Strike = -1 if font_strikethrough else 0
+                updates_made.append(f"set strikethrough to {font_strikethrough} for {range_desc}")
+        except:
+            if font_strikethrough is not None:
+                updates_made.append("strikethrough not supported in this PowerPoint version")
+        
+        # Handle colors (convert hex to RGB)
+        def hex_to_rgb(hex_color):
+            """Convert hex color to RGB integer for PowerPoint"""
+            if hex_color.startswith('#'):
+                hex_color = hex_color[1:]
+            return int(hex_color[4:6] + hex_color[2:4] + hex_color[0:2], 16)
+        
+        if font_color is not None:
+            try:
+                rgb_color = hex_to_rgb(font_color)
+                text_range.Font.Color.RGB = rgb_color
+                updates_made.append(f"set font color to {font_color} for {range_desc}")
+            except:
+                updates_made.append(f"invalid font color format: {font_color}")
+        
+        if background_color is not None:
+            try:
+                rgb_color = hex_to_rgb(background_color)
+                text_range.Font.Fill.ForeColor.RGB = rgb_color
+                updates_made.append(f"set background color to {background_color} for {range_desc}")
+            except:
+                updates_made.append(f"invalid background color format: {background_color}")
+        
+        # Apply paragraph formatting (only to entire text, not character ranges)
+        if start_char is None and end_char is None:
+            if text_align is not None:
+                alignment_map = {
+                    "left": 1,
+                    "center": 2,
+                    "right": 3,
+                    "justify": 4
+                }
+                if text_align.lower() in alignment_map:
+                    text_range.ParagraphFormat.Alignment = alignment_map[text_align.lower()]
+                    updates_made.append(f"set text alignment to {text_align}")
+            
+            if line_spacing is not None:
+                text_range.ParagraphFormat.LineRuleWithin = 1  # Multiple line spacing
+                text_range.ParagraphFormat.SpaceWithin = line_spacing
+                updates_made.append(f"set line spacing to {line_spacing}")
+        
+        # Apply character spacing
+        if char_spacing is not None:
+            try:
+                text_range.Font.Spacing = char_spacing
+                updates_made.append(f"set character spacing to {char_spacing} for {range_desc}")
+            except:
+                updates_made.append("character spacing not supported in this PowerPoint version")
+        
+        # Apply text margins (only to entire textbox)
+        if start_char is None and end_char is None:
+            if left_margin is not None:
+                target_shape.TextFrame.MarginLeft = left_margin
+                updates_made.append(f"set left margin to {left_margin}")
+            
+            if right_margin is not None:
+                target_shape.TextFrame.MarginRight = right_margin
+                updates_made.append(f"set right margin to {right_margin}")
+            
+            if top_margin is not None:
+                target_shape.TextFrame.MarginTop = top_margin
+                updates_made.append(f"set top margin to {top_margin}")
+            
+            if bottom_margin is not None:
+                target_shape.TextFrame.MarginBottom = bottom_margin
+                updates_made.append(f"set bottom margin to {bottom_margin}")
+        
+        # Clear slide context cache to ensure fresh context on next request
+        try:
+            from slide_context_reader import PowerPointSlideReader
+            reader = get_slide_reader()
+            if reader:
+                reader.clear_context_cache()
+        except Exception as e:
+            pass  # Silently continue if cache clearing fails
+        
+        if updates_made:
+            return f"Updated textbox {id} on slide {target_slide.SlideIndex}: {'; '.join(updates_made)}"
+        else:
+            return f"No updates specified for textbox {id}"
+    
+    except Exception as e:
+        return f"Error updating textbox {id}: {str(e)}"
 
 # Universal object manipulation tools
 @tool
@@ -267,7 +475,9 @@ General PowerPoint Concepts:
   - Height: 540 points (7.5 inches)
   - Origin (0, 0) is the top-left corner of the slide.
 
-Remember use tools and change the slides only if necessary. If the user is asking something about a slide or any other information that does not require you to change the slide then please do not answer the users questions in a new textbox on a slide.
+Remember use tools and change the slides only if necessary. 
+If the user is asking something about a slide or any other information that does not require you to change the slide then please do not answer the users questions in a new textbox on a slide.
+For examle if the user asks what is on the slide then you should not answer the users questions in a new textbox on a slide.
 """
 
 # Create a custom logging handler to capture code generation
@@ -340,6 +550,7 @@ def clear_slide_context_cache():
 agent = CodeAgent(
     tools=[
         add_textbox_tool,
+        update_textbox_tool,
         move_object,
         resize_object,
         get_object_properties,
