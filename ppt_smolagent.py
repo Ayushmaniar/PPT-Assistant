@@ -17,7 +17,7 @@ if not openai_api_key:
 
 # Define the model using OpenAIServerModel
 model = OpenAIServerModel(
-    model_id="gpt-4o-mini",
+    model_id="gpt-4.1-nano",
     api_key=openai_api_key,
     api_base = "https://api.openai.com/v1"
 )
@@ -343,7 +343,6 @@ agent = CodeAgent(
         add_textbox_tool,
         move_object,
         resize_object,
-        rotate_object,
         get_object_properties,
         duplicate_object,
         delete_object
