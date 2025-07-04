@@ -141,7 +141,7 @@ def resize_object(id: int, width: int, height: int) -> str:
 @tool
 def get_object_properties(id: int) -> dict:
     """
-    Return properties of an object by ID.
+    Return properties of an object by ID. This is used to get the properties of an object to know what to do with it. This is 
 
     Args:
         id (int): The ID of the object to inspect.
@@ -252,8 +252,7 @@ USE THIS CONTEXT to make informed decisions about:
 - How to complement or enhance the existing slide content
 - Whether modifications should be made to existing elements vs. adding new ones
 
-AVAILABLE TOOLS:
-1. add_textbox_tool: Create new textboxes with customizable formatting
+
 
 CODE FORMATTING REQUIREMENTS:
 - ALWAYS write code between <code>(.*?)</code> 
