@@ -342,7 +342,6 @@ agent = CodeAgent(
         add_textbox_tool,
         move_object,
         resize_object,
-        rotate_object,
         get_object_properties,
         duplicate_object,
         delete_object
