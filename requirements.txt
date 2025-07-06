@@ -4,3 +4,5 @@ smolagents[openai]
 huggingface_hub
 win32com
 python-dotenv
+opencv-python
+numpy
