@@ -83,8 +83,17 @@ class PPTAssistant:
         header_border = tk.Frame(header_frame, bg=self.accent_color, height=3)
         header_border.pack(fill=tk.X, side=tk.TOP)
         
-        title_label = tk.Label(header_frame, text="💼 PPT Assistant", 
-                              bg=self.card_bg, fg=self.accent_color, 
+        # Check if lightning-fast optimization is available
+        try:
+            from lightning_slide_context_reader import LightningFastPowerPointSlideReader
+            title_text = "💼 PPT Assistant ⚡ Lightning-Fast"
+            title_color = "#22c55e"  # Green for optimization active
+        except ImportError:
+            title_text = "💼 PPT Assistant"
+            title_color = self.accent_color
+        
+        title_label = tk.Label(header_frame, text=title_text, 
+                              bg=self.card_bg, fg=title_color, 
                               font=("Segoe UI", 18, "bold"), pady=15)
         title_label.pack()
 
@@ -311,7 +320,7 @@ class PPTAssistant:
                                         values=[
                                             "Select Template",
                                             "Color Text Pattern Example",
-                                            "Debug Markdown Test",
+                                            "Debug HTML Test",
                                             "Replace Textbox Content Example",
                                             "Modify Text in Textbox Example", 
                                             "Add Text to Textbox Example",
@@ -359,6 +368,11 @@ class PPTAssistant:
         self.debug_editor.bind('<Control-Z>', lambda e: self.debug_editor.edit_undo())
         self.debug_editor.bind('<Control-y>', lambda e: self.debug_editor.edit_redo())
         self.debug_editor.bind('<Control-Y>', lambda e: self.debug_editor.edit_redo())
+
+        # Add global keyboard shortcut for refreshing context (F5 or Ctrl+R)
+        self.root.bind('<F5>', lambda e: self.refresh_slide_context_with_feedback())
+        self.root.bind('<Control-r>', lambda e: self.refresh_slide_context_with_feedback())
+        self.root.bind('<Control-R>', lambda e: self.refresh_slide_context_with_feedback())
 
         # Control buttons section
         controls_frame = tk.Frame(left_panel, bg=self.card_bg, relief="flat")
@@ -435,10 +449,10 @@ class PPTAssistant:
         context_title.pack(anchor="w")
 
         # Refresh context button
-        refresh_context_btn = tk.Button(
+        self.refresh_context_btn = tk.Button(
             context_header, 
-            text="🔄 Refresh Context", 
-            command=self.refresh_slide_context, 
+            text="🔄 Refresh Context (F5)", 
+            command=self.refresh_slide_context_with_feedback, 
             bg=self.btn_bg, 
             fg=self.btn_fg,
             font=("Segoe UI", 9, "bold"), 
@@ -450,7 +464,13 @@ class PPTAssistant:
             activebackground=self.btn_hover_bg,
             activeforeground=self.btn_fg
         )
-        refresh_context_btn.pack(anchor="w", pady=(5, 0))
+        self.refresh_context_btn.pack(anchor="w", pady=(5, 0))
+
+        # Add shortcut info
+        shortcut_info = tk.Label(context_header, text="💡 Shortcuts: F5 or Ctrl+R", 
+                                bg=self.card_bg, fg="#9ca3af", 
+                                font=("Segoe UI", 8))
+        shortcut_info.pack(anchor="w", pady=(2, 0))
 
         # Context display area (vertical wide format)
         self.context_display = scrolledtext.ScrolledText(
@@ -622,13 +642,13 @@ modify_text_in_textbox(
 
 print("Check if colors are applied correctly before adding italic formatting")''',
             
-            "Debug Markdown Test": '''# Debug: Test markdown parsing step by step
+            "Debug HTML Test": '''# Debug: Test HTML parsing step by step
 
 # Test 1: Simple replacement without any formatting
 modify_text_in_textbox(
     id=123,  # Replace with actual textbox ID
     find_pattern=r"League of Legends",
-    replacement_text="LEAGUE_REPLACED",  # No markdown, just plain text
+    replacement_text="LEAGUE_REPLACED",  # No HTML, just plain text
     regex_flags="IGNORECASE"
 )
 
@@ -656,7 +676,7 @@ print("Step 3: Did emoji become italic 'thinking'?")''',
             "Replace Textbox Content Example": '''# Example: Completely replace all text in a textbox
 replace_textbox_content(
     id=123,  # Replace with actual textbox ID from slide context
-    markdown_text="**NEW TITLE: Battle of the Games** 🎮\\n\\n• **League of Legends:** {color:purple}Strategic MOBA{/color}\\n• **Valorant:** {color:orange}Tactical FPS{/color}\\n\\nWhich will you choose?",
+    markdown_text="<b>NEW TITLE: Battle of the Games</b> 🎮<br><br><ul><li><b>League of Legends:</b> <span style='color: purple'>Strategic MOBA</span></li><li><b>Valorant:</b> <span style='color: orange'>Tactical FPS</span></li></ul><br>Which will you choose?",
     font_size=16,
     text_align="center"
 )''',
@@ -693,14 +713,14 @@ modify_text_in_textbox(
 # Add text to the beginning
 add_text_to_textbox(
     id=123,  # Replace with actual textbox ID
-    markdown_text="🔥 **EPIC GAMING SHOWDOWN** 🔥\\n\\n",
+    markdown_text="🔥 <b>EPIC GAMING SHOWDOWN</b> 🔥<br><br>",
     position="start"
 )
 
 # Add text to the end
 add_text_to_textbox(
     id=123,  # Replace with actual textbox ID
-    markdown_text="\\n\\n{color:gray}*Join the debate in the comments!*{/color}",
+    markdown_text="<br><br><span style='color: gray'><i>Join the debate in the comments!</i></span>",
     position="end"
 )''',
             
@@ -727,7 +747,7 @@ format_textbox_style(
             "Add New Textbox Example": '''# Example: Add a completely new textbox to the slide
 add_textbox(
     slide_idx=1,  # Current slide
-    markdown_text="**🎯 GAME STATS COMPARISON** 🎯\\n\\n• **League:** 150M+ monthly players\\n• **Valorant:** 15M+ monthly players\\n\\n{color:green}League wins in numbers!{/color}",
+    markdown_text="<b>🎯 GAME STATS COMPARISON</b> 🎯<br><br><ul><li><b>League:</b> 150M+ monthly players</li><li><b>Valorant:</b> 15M+ monthly players</li></ul><br><span style='color: green'>League wins in numbers!</span>",
     left=500,  # Position on right side
     top=100,
     width=400,
@@ -834,9 +854,15 @@ modify_text_in_textbox(
                 self.context_display.insert(tk.END, "❌ No presentation open.\n\nPlease create or open a presentation first.")
                 return
             
-            # Get slide context using the agent's context reader
-            context = ppt_smolagent.get_current_slide_context()
+            # Show loading indicator
+            self.context_display.delete(1.0, tk.END)
+            self.context_display.insert(tk.END, "🔄 Refreshing context...\n")
+            self.root.update()  # Force UI update to show loading message
             
+            # Get slide context using the agent's context reader with force refresh
+            context = ppt_smolagent.get_current_slide_context(force_refresh=True)
+            
+            # Clear and update the display
             self.context_display.delete(1.0, tk.END)
             self.context_display.insert(tk.END, f"🔄 Updated: {datetime.datetime.now().strftime('%H:%M:%S')}\n")
             self.context_display.insert(tk.END, "="*40 + "\n\n")
@@ -847,7 +873,34 @@ modify_text_in_textbox(
             
         except Exception as e:
             self.context_display.delete(1.0, tk.END)
-            self.context_display.insert(tk.END, f"❌ Error getting slide context:\n\n{str(e)}")
+            self.context_display.insert(tk.END, f"❌ Error getting slide context:\n\n{str(e)}\n\n")
+            self.context_display.insert(tk.END, "💡 Troubleshooting tips:\n")
+            self.context_display.insert(tk.END, "• Make sure PowerPoint is open\n")
+            self.context_display.insert(tk.END, "• Ensure a presentation is loaded\n")
+            self.context_display.insert(tk.END, "• Try clicking on a slide in PowerPoint first\n")
+            self.context_display.insert(tk.END, "• Check if there are any unsaved changes")
+
+    def refresh_slide_context_with_feedback(self):
+        """Refresh slide context with visual feedback on the button"""
+        # Change button text to show loading state
+        original_text = self.refresh_context_btn.cget("text")
+        original_bg = self.refresh_context_btn.cget("bg")
+        
+        self.refresh_context_btn.config(text="⏳ Refreshing...", bg="#f59e0b")  # Orange color for loading
+        self.refresh_context_btn.update()
+        
+        try:
+            # Call the actual refresh method
+            self.refresh_slide_context()
+            
+            # Show success state briefly
+            self.refresh_context_btn.config(text="✅ Refreshed!", bg="#10b981")  # Green for success
+            self.root.after(1000, lambda: self.refresh_context_btn.config(text=original_text, bg=original_bg))
+            
+        except Exception as e:
+            # Show error state briefly
+            self.refresh_context_btn.config(text="❌ Error", bg="#ef4444")  # Red for error
+            self.root.after(2000, lambda: self.refresh_context_btn.config(text=original_text, bg=original_bg))
 
     def on_tab_changed(self, event):
         """Handle tab change events"""

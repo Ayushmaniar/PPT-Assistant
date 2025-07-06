@@ -1,7 +1,0 @@
-We want to build an AI Agent that can aid in Presentation making.
-The GUI of this "app" has to be a chat interface (click a button to start a new chat).
-The changes should happen "live", in the sense that asking the AI to make a change should dynamically update the PPT that is open currently.
-The tools should be made using the pywin32 library with COM automation that allows full control over the presentation making.
-The tools should includes things like CRUD operations for text boxes, shapes etc for the start (we will add more tools later).
-The agentic framework that we aim to use is HuggingFace smolagents framework.
-There should also be tools to have animation control over objects.

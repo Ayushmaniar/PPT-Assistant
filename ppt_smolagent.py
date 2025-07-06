@@ -8,7 +8,14 @@ import io
 import sys
 import win32com.client
 import pythoncom
-from slide_context_reader import PowerPointSlideReader
+# Import the optimized lightning-fast implementation
+try:
+    from lightning_slide_context_reader import LightningFastPowerPointSlideReader as PowerPointSlideReader
+    print("✅ Using Lightning-Fast PowerPoint Slide Context Reader (24% faster)")
+except ImportError:
+    # Fallback to original implementation if lightning-fast is not available
+    from slide_context_reader import PowerPointSlideReader
+    print("⚠️ Using original PowerPoint Slide Context Reader (lightning-fast version not found)")
 
 # Load environment variables from .env file
 load_dotenv()
@@ -25,28 +32,28 @@ model = OpenAIServerModel(
     api_base = "https://api.openai.com/v1"
 )
 
-# Import markdown processing functions
-from markdown_processor import parse_markdown_text, process_markdown_lists, apply_markdown_formatting
+# Import HTML processing functions
+from html_processor import parse_html_text, process_html_lists, apply_html_formatting
 
 # Tool to add a textbox to a PowerPoint slide
 @tool
-def add_textbox(slide_idx: int = 1, markdown_text: str = "**Sample Text**", left: int = 100, top: int = 100, width: int = 400, height: int = 50, font_size: int = None, font_name: str = None, text_align: str = "left") -> str:
+def add_textbox(slide_idx: int = 1, markdown_text: str = "<b>Sample Text</b>", left: int = 100, top: int = 100, width: int = 400, height: int = 50, font_size: int = None, font_name: str = None, text_align: str = "left") -> str:
     """
-    Add a textbox to a PowerPoint slide with markdown-formatted text.
-    Markdown Syntax Supported:
-        **bold text** or __bold text__ - Bold formatting
-        *italic text* or _italic text_ - Italic formatting
-        ~~strikethrough~~ - Strikethrough formatting
-        [u]underlined[/u] - Underlined text
-        {color:red}colored text{/color} - Colored text (hex #FF0000 or names)
-        {bg:yellow}highlighted{/bg} - Background color
-        - bullet point or * bullet point - Bullet lists
-        1. numbered item - Numbered lists
-        # Header 1, ## Header 2, ### Header 3 - Headers
-    
+    Add a textbox to a PowerPoint slide with HTML-formatted text.
+    HTML Syntax Supported:
+        <b>bold text</b> or <strong>bold text</strong> - Bold formatting
+        <i>italic text</i> or <em>italic text</em> - Italic formatting
+        <s>strikethrough</s> or <del>strikethrough</del> - Strikethrough formatting
+        <u>underlined</u> - Underlined text
+        <span style="color: red">colored text</span> - Colored text (hex #FF0000 or names)
+        <span style="background-color: yellow">highlighted</span> - Background color
+        <ul><li>bullet point</li></ul> - Bullet lists
+        <ol><li>numbered item</li></ol> - Numbered lists
+        <h1>Header 1</h1>, <h2>Header 2</h2>, <h3>Header 3</h3> - Headers
+
     Args:
         slide_idx: The slide number (1-indexed) to add the textbox to
-        markdown_text: The markdown-formatted text content for the textbox
+        markdown_text: The HTML-formatted text content for the textbox
         left: Left position of the textbox in points
         top: Top position of the textbox in points
         width: Width of the textbox in points
@@ -54,7 +61,7 @@ def add_textbox(slide_idx: int = 1, markdown_text: str = "**Sample Text**", left
         font_size: Base font size for the text (optional, headers will be larger)
         font_name: Font name for the text (optional)
         text_align: Text alignment - "left", "center", or "right" (default: "left")
-    
+
     Returns:
         str: Confirmation message of the textbox addition
     """
@@ -70,19 +77,19 @@ def add_textbox(slide_idx: int = 1, markdown_text: str = "**Sample Text**", left
         else:
             slide = presentation.Slides(slide_idx)
         
-        # Process markdown (always enabled now)
+        # Process HTML (always enabled now)
         # First process lists and headers
-        processed_text, list_info = process_markdown_lists(markdown_text)
+        processed_text, list_info = process_html_lists(markdown_text)
         
         # Then process inline formatting
-        plain_text, format_segments = parse_markdown_text(processed_text)
+        plain_text, format_segments = parse_html_text(processed_text)
         
         # Create the textbox
         box = slide.Shapes.AddTextbox(1, left, top, width, height)
         text_range = box.TextFrame.TextRange
         
-        # Apply markdown formatting
-        apply_markdown_formatting(text_range, plain_text, format_segments)
+        # Apply HTML formatting
+        apply_html_formatting(text_range, plain_text, format_segments)
         
         # Apply header formatting
         for info in list_info:
@@ -134,7 +141,7 @@ def add_textbox(slide_idx: int = 1, markdown_text: str = "**Sample Text**", left
         except Exception as e:
             pass  # Silently continue if cache clearing fails
         
-        return f"Textbox added to slide {slide_idx} with markdown formatting: {plain_text[:50]}{'...' if len(plain_text) > 50 else ''}"
+        return f"Textbox added to slide {slide_idx} with HTML formatting: {plain_text[:50]}{'...' if len(plain_text) > 50 else ''}"
         
     except Exception as e:
         return f"Error adding textbox: {str(e)}"
@@ -142,25 +149,25 @@ def add_textbox(slide_idx: int = 1, markdown_text: str = "**Sample Text**", left
 @tool
 def replace_textbox_content(id: int, markdown_text: str, font_size: int = None, font_name: str = None, text_align: str = None) -> str:
     """
-    COMPLETELY REPLACE all text content in a textbox with new markdown-formatted text.
+    COMPLETELY REPLACE all text content in a textbox with new HTML-formatted text.
     
     Use this when you want to completely overwrite the existing text content.
     All existing text will be deleted and replaced with the new content.
     
-    Markdown Syntax Supported:
-        **bold text** - Bold formatting
-        *italic text* - Italic formatting
-        ~~strikethrough~~ - Strikethrough formatting
-        [u]underlined[/u] - Underlined text
-        {color:red}colored text{/color} - Colored text (hex #FF0000 or names)
-        {bg:yellow}highlighted{/bg} - Background color
-        - bullet point - Bullet lists
-        1. numbered item - Numbered lists
-        # Header 1, ## Header 2, ### Header 3 - Headers
+    HTML Syntax Supported:
+        <b>bold text</b> or <strong>bold text</strong> - Bold formatting
+        <i>italic text</i> or <em>italic text</em> - Italic formatting
+        <s>strikethrough</s> or <del>strikethrough</del> - Strikethrough formatting
+        <u>underlined</u> - Underlined text
+        <span style="color: red">colored text</span> - Colored text (hex #FF0000 or names)
+        <span style="background-color: yellow">highlighted</span> - Background color
+        <ul><li>bullet point</li></ul> - Bullet lists
+        <ol><li>numbered item</li></ol> - Numbered lists
+        <h1>Header 1</h1>, <h2>Header 2</h2>, <h3>Header 3</h3> - Headers
     
     Args:
         id: The ID of the textbox to update
-        markdown_text: New markdown-formatted text content (replaces ALL existing text)
+        markdown_text: New HTML-formatted text content (replaces ALL existing text)
         font_size: Base font size in points (headers will be larger)
         font_name: Font name for the text
         text_align: Text alignment - "left", "center", "right", or "justify"
@@ -188,8 +195,8 @@ def modify_text_in_textbox(id: int, find_pattern: str, replacement_text: str, re
     Args:
         id: The ID of the textbox to modify
         find_pattern: Text pattern to find (can be plain text or regex)
-        replacement_text: Markdown-formatted text to replace matches with.
-            Use markdown syntax like "**bold**", "*italic*", "{color:red}text{/color}" etc.
+        replacement_text: HTML-formatted text to replace matches with.
+            Use HTML syntax like "<b>bold</b>", "<i>italic</i>", "<span style='color: red'>text</span>" etc.
             Set to empty string ("") to delete the matched text.
         regex_flags: Regex flags like "IGNORECASE" (default: "IGNORECASE")
     
@@ -212,7 +219,7 @@ def add_text_to_textbox(id: int, markdown_text: str, position: str = "end") -> s
     
     Args:
         id: The ID of the textbox to modify
-        markdown_text: Markdown-formatted text to add
+        markdown_text: HTML-formatted text to add
         position: Where to add the text - "start" (beginning) or "end" (default)
     
     Returns:
@@ -309,10 +316,10 @@ def _update_textbox_internal(id: int, markdown_text: str = None, text_operation:
             current_text = target_shape.TextFrame.TextRange.Text if target_shape.TextFrame.HasText else ""
             
             if text_operation == "replace":
-                # Process markdown and apply formatting
-                processed_text, list_info = process_markdown_lists(markdown_text)
-                plain_text, format_segments = parse_markdown_text(processed_text)
-                apply_markdown_formatting(target_shape.TextFrame.TextRange, plain_text, format_segments)
+                # Process HTML and apply formatting
+                processed_text, list_info = process_html_lists(markdown_text)
+                plain_text, format_segments = parse_html_text(processed_text)
+                apply_html_formatting(target_shape.TextFrame.TextRange, plain_text, format_segments)
                 
                 # Apply header formatting
                 for info in list_info:
@@ -341,16 +348,16 @@ def _update_textbox_internal(id: int, markdown_text: str = None, text_operation:
                         except Exception as e:
                             print(f"Warning: Could not apply header formatting: {e}")
                 
-                updates_made.append(f"replaced text with markdown-formatted content")
+                updates_made.append(f"replaced text with HTML-formatted content")
                     
             elif text_operation == "append":
-                # For append/prepend, we need to process the combined text to apply markdown formatting
+                # For append/prepend, we need to process the combined text to apply HTML formatting
                 combined_text = current_text + markdown_text
                 
-                # Process the combined markdown text
-                processed_text, list_info = process_markdown_lists(combined_text)
-                plain_text, format_segments = parse_markdown_text(processed_text)
-                apply_markdown_formatting(target_shape.TextFrame.TextRange, plain_text, format_segments)
+                # Process the combined HTML text
+                processed_text, list_info = process_html_lists(combined_text)
+                plain_text, format_segments = parse_html_text(processed_text)
+                apply_html_formatting(target_shape.TextFrame.TextRange, plain_text, format_segments)
                 
                 # Apply header formatting if any headers are present
                 for info in list_info:
@@ -379,16 +386,16 @@ def _update_textbox_internal(id: int, markdown_text: str = None, text_operation:
                         except Exception as e:
                             print(f"Warning: Could not apply header formatting: {e}")
                 
-                updates_made.append(f"appended markdown-formatted text: '{markdown_text[:30]}{'...' if len(markdown_text) > 30 else ''}'")
+                updates_made.append(f"appended HTML-formatted text: '{markdown_text[:30]}{'...' if len(markdown_text) > 30 else ''}'")
                 
             elif text_operation == "prepend":
-                # For prepend, we need to process the combined text to apply markdown formatting
+                # For prepend, we need to process the combined text to apply HTML formatting
                 combined_text = markdown_text + current_text
                 
-                # Process the combined markdown text
-                processed_text, list_info = process_markdown_lists(combined_text)
-                plain_text, format_segments = parse_markdown_text(processed_text)
-                apply_markdown_formatting(target_shape.TextFrame.TextRange, plain_text, format_segments)
+                # Process the combined HTML text
+                processed_text, list_info = process_html_lists(combined_text)
+                plain_text, format_segments = parse_html_text(processed_text)
+                apply_html_formatting(target_shape.TextFrame.TextRange, plain_text, format_segments)
                 
                 # Apply header formatting if any headers are present
                 for info in list_info:
@@ -417,7 +424,7 @@ def _update_textbox_internal(id: int, markdown_text: str = None, text_operation:
                         except Exception as e:
                             print(f"Warning: Could not apply header formatting: {e}")
                 
-                updates_made.append(f"prepended markdown-formatted text: '{markdown_text[:30]}{'...' if len(markdown_text) > 30 else ''}'")
+                updates_made.append(f"prepended HTML-formatted text: '{markdown_text[:30]}{'...' if len(markdown_text) > 30 else ''}'")
         
         # Handle regex-based text replacement
         if regex_finder:
@@ -442,10 +449,10 @@ def _update_textbox_internal(id: int, markdown_text: str = None, text_operation:
                 if matches:
                     if replacement_text is not None:
                         # Check if replacement contains markdown
-                        if any(marker in replacement_text for marker in ['**', '*', '~~', '[u]', '{color:', '{bg:']):
-                            # Process markdown in replacement text to get clean text and formatting
-                            processed_replacement, _ = process_markdown_lists(replacement_text)
-                            plain_replacement, format_segments = parse_markdown_text(processed_replacement)
+                        if any(marker in replacement_text for marker in ['<b>', '<i>', '<u>', '<s>', '<span', '<strong>', '<em>']):
+                            # Process HTML in replacement text to get clean text and formatting
+                            processed_replacement, _ = process_html_lists(replacement_text)
+                            plain_replacement, format_segments = parse_html_text(processed_replacement)
                             
                             # Replace text in reverse order to maintain position indices
                             new_text = current_text
@@ -928,7 +935,7 @@ USE THIS CONTEXT to make informed decisions about positioning, styling, and cont
    - Use when: User wants to modify specific words
    - Example: "Make 'Company Name' bold" or "Change 'red' to 'blue'"
 
-3. **add_text_to_textbox(id, markdown_text, position)**
+3. **add_text_to_textbox(id, html_text, position)**
    - ADDS text to beginning ("start") or end ("end") of existing content
    - Use when: User wants to append/prepend text
    - Example: "Add 'Confidential' to the end"
@@ -938,16 +945,16 @@ USE THIS CONTEXT to make informed decisions about positioning, styling, and cont
    - Use when: User wants to change appearance only
    - Example: "Make the text center-aligned" or "Change font to Arial"
 
-🎨 MARKDOWN FORMATTING SYNTAX:
-- **bold** or __bold__ - Bold text
-- *italic* or _italic_ - Italic text  
-- ~~strikethrough~~ - Strikethrough text
-- [u]underlined[/u] - Underlined text
-- {color:red}colored{/color} - Colored text (hex #FF0000 or color names)
-- {bg:yellow}highlighted{/bg} - Background color
-- # Header 1, ## Header 2, ### Header 3 - Headers (auto-sized)
-- - bullet or * bullet - Bullet points
-- 1. numbered item - Numbered lists
+🎨 HTML FORMATTING SYNTAX:
+- <b>bold</b> or <strong>bold</strong> - Bold text
+- <i>italic</i> or <em>italic</em> - Italic text  
+- <s>strikethrough</s> or <del>strikethrough</del> - Strikethrough text
+- <u>underlined</u> - Underlined text
+- <span style="color: red">colored</span> - Colored text (hex #FF0000 or color names)
+- <span style="background-color: yellow">highlighted</span> - Background color
+- <h1>Header 1</h1>, <h2>Header 2</h2>, <h3>Header 3</h3> - Headers (auto-sized)
+- <ul><li>bullet point</li></ul> - Bullet lists
+- <ol><li>numbered item</li></ol> - Numbered lists
 
 📐 POSITIONING TOOLS:
 
@@ -1002,12 +1009,49 @@ code_capture_handler = CodeCaptureHandler()
 # Global slide context reader instance
 slide_reader = None
 
+@tool
+def get_current_slide_context_html(force_refresh: bool = False) -> str:
+    """
+    Get the current PowerPoint slide context with ALL text content in HTML format.
+    
+    *** IMPORTANT: This tool returns text content in HTML format ***
+    
+    The returned context includes HTML tags for formatting:
+    - <b>bold text</b> for bold formatting
+    - <i>italic text</i> for italic formatting
+    - <u>underlined text</u> for underlined formatting  
+    - <s>strikethrough text</s> for strikethrough formatting
+    - <span style="color: #RRGGBB">colored text</span> for colored text
+    
+    Use this context to understand the current slide content and formatting.
+    When modifying text, you can use these same HTML tags in your tool calls.
+    
+    Args:
+        force_refresh: If True, force a fresh read of the slide (ignore cache)
+    
+    Returns:
+        str: The current slide context with HTML-formatted text content
+    """
+    try:
+        reader = get_slide_reader()
+        if reader and reader.ppt_app:
+            if force_refresh:
+                context = reader.force_refresh_context()
+            else:
+                context = reader.get_current_context()
+            return context if context else "No slide context available"
+        else:
+            return "PowerPoint not connected - no slide context available"
+    except Exception as e:
+        return f"Error reading slide context: {e}"
+
 def get_slide_reader():
     """Get or create the global slide reader instance."""
     global slide_reader
     if slide_reader is None:
         try:
             slide_reader = PowerPointSlideReader()
+            print("🚀 Slide reader initialized with original HTML conversion")
         except Exception as e:
             print(f"Warning: Could not initialize slide reader: {e}")
             slide_reader = None
@@ -1060,7 +1104,7 @@ agent = CodeAgent(
         delete_object
     ],
     instructions=instructions,
-    max_steps=3,
+    max_steps=2,
     model=model,
     verbosity_level=LogLevel.DEBUG
 )
