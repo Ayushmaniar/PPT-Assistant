@@ -203,157 +203,98 @@ class LightningFastPowerPointSlideReader:
     
     def convert_powerpoint_text_to_html_lightning(self, text_range):
         """
-        LIGHTNING FAST version that maintains 100% accuracy of the original algorithm
-        but applies strategic optimizations to reduce COM calls.
-        
-        Key strategy: Use the EXACT same algorithm but with optimized variable access patterns.
+        LIGHTNING FAST version that uses the .Runs() collection for maximum efficiency.
+        This approach iterates through segments of text that share the same formatting,
+        dramatically reducing the number of COM calls compared to a character-by-character check.
         """
         try:
-            full_text = text_range.Text
-            if not full_text:
-                return ""
-            
+            if not hasattr(text_range, 'Runs') or not text_range.Text:
+                return text_range.Text if hasattr(text_range, 'Text') else ""
+
             html_parts = []
-            current_pos = 1  # PowerPoint uses 1-based indexing
             
-            # OPTIMIZATION 1: Cache the default color to avoid repeated COM calls
-            default_color = None
+            # Get the collection of text runs. Each run has uniform formatting.
+            runs = text_range.Runs()
+            if not runs:
+                return text_range.Text # Fallback for empty text ranges
+
+            # OPTIMIZATION: Get default color once from the parent range
+            default_color = 0 # Default to black
             try:
-                default_color = text_range.Font.Color.RGB
+                if text_range.Font.Color.Type == 2: # msoColorTypeRGB
+                     default_color = text_range.Font.Color.RGB
             except:
-                default_color = 0  # Assume black as default
-            
-            # OPTIMIZATION 2: Pre-calculate text length to avoid repeated len() calls
-            text_length = len(full_text)
-            
-            # Process each character to detect formatting changes - SAME ALGORITHM AS ORIGINAL
-            i = 0
-            while i < text_length:
-                char = full_text[i]
+                pass
+
+            for run in runs:
+                run_font = run.Font
+                run_text = run.Text
+                
+                if not run_text.strip(): # Skip whitespace-only runs
+                    html_parts.append(run_text)
+                    continue
+
+                open_tags = []
+                close_tags = []
+
+                # --- Check formatting properties for the run ---
+                if run_font.Bold:
+                    open_tags.append('<b>')
+                    close_tags.insert(0, '</b>')
+                if run_font.Italic:
+                    open_tags.append('<i>')
+                    close_tags.insert(0, '</i>')
+                if run_font.Underline:
+                    open_tags.append('<u>')
+                    close_tags.insert(0, '</u>')
                 
                 try:
-                    # Get character range for this position
-                    char_range = text_range.Characters(current_pos, 1)
-                    
-                    # OPTIMIZATION 3: Cache font object to reduce COM calls
-                    char_font = char_range.Font
-                    
-                    # Check formatting - using cached font object
-                    is_bold = bool(char_font.Bold)
-                    is_italic = bool(char_font.Italic)
-                    is_underline = bool(char_font.Underline)
-                    
-                    # Try to get strikethrough (not always available)
-                    is_strikethrough = False
-                    try:
-                        is_strikethrough = bool(char_font.Strike)
-                    except:
-                        pass
-                    
-                    # Get color - handle more carefully - using cached font
-                    color_rgb = default_color  # Default fallback
-                    try:
-                        color_rgb = char_font.Color.RGB
-                    except:
-                        pass
-                    
-                    # Look ahead to see how many consecutive characters have the same formatting
-                    consecutive_chars = char
-                    j = i + 1
-                    consecutive_length = 1
-                    
-                    # OPTIMIZATION 4: Limit lookahead to reduce excessive COM calls
-                    max_lookahead = min(text_length - i, 50)  # Don't look ahead more than 50 chars
-                    
-                    while j < i + max_lookahead and j < text_length:
-                        try:
-                            next_char_range = text_range.Characters(current_pos + consecutive_length, 1)
-                            
-                            # OPTIMIZATION 5: Cache next font object too
-                            next_font = next_char_range.Font
-                            
-                            # Check if formatting is the same - using cached font objects
-                            next_bold = bool(next_font.Bold)
-                            next_italic = bool(next_font.Italic)
-                            next_underline = bool(next_font.Underline)
-                            
-                            next_strikethrough = False
-                            try:
-                                next_strikethrough = bool(next_font.Strike)
-                            except:
-                                pass
-                            
-                            next_color = default_color  # Default fallback
-                            try:
-                                next_color = next_font.Color.RGB
-                            except:
-                                pass
-                            
-                            # If formatting matches, include this character
-                            if (next_bold == is_bold and 
-                                next_italic == is_italic and 
-                                next_underline == is_underline and 
-                                next_strikethrough == is_strikethrough and
-                                next_color == color_rgb):
-                                consecutive_chars += full_text[j]
-                                consecutive_length += 1
-                                j += 1
-                            else:
-                                break
-                        except:
-                            break
-                    
-                    # Build formatting tags - SAME AS ORIGINAL
-                    open_tags = []
-                    close_tags = []
-                    
-                    if is_bold:
-                        open_tags.append('<b>')
-                        close_tags.insert(0, '</b>')
-                    if is_italic:
-                        open_tags.append('<i>')
-                        close_tags.insert(0, '</i>')
-                    if is_underline:
-                        open_tags.append('<u>')
-                        close_tags.insert(0, '</u>')
-                    if is_strikethrough:
+                    if run_font.Strikethrough: # Not all versions have this
                         open_tags.append('<s>')
                         close_tags.insert(0, '</s>')
-                    
-                    # Handle color - SAME LOGIC AS ORIGINAL
-                    if color_rgb is not None and color_rgb != default_color:
-                        # Convert BGR to hex (PowerPoint uses BGR format)
-                        r = (color_rgb >> 16) & 0xFF
-                        g = (color_rgb >> 8) & 0xFF
-                        b = color_rgb & 0xFF
+                except:
+                    pass
+                
+                # --- Handle color ---
+                hex_color = None
+                try:
+                    # Attempt to get the color as a direct RGB value first
+                    color_bgr = run_font.Color.RGB
+                    r = color_bgr & 0xFF
+                    g = (color_bgr >> 8) & 0xFF
+                    b = (color_bgr >> 16) & 0xFF
+                    hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                except Exception:
+                    # If direct RGB fails, it's likely a theme color
+                    try:
+                        theme_color_index = run_font.Color.ObjectThemeColor
+                        theme_color_bgr = self.presentation.SlideMaster.Theme.ThemeColorScheme(theme_color_index).RGB
+                        r = theme_color_bgr & 0xFF
+                        g = (theme_color_bgr >> 8) & 0xFF
+                        b = (theme_color_bgr >> 16) & 0xFF
                         hex_color = f"#{r:02x}{g:02x}{b:02x}"
-                        
-                        # Skip black/near-black colors to reduce token usage (optimization)
-                        if color_rgb != 0 and hex_color != "#000000":
-                            open_tags.append(f'<span style="color: {hex_color}">')
-                            close_tags.insert(0, '</span>')
-                    
-                    # Escape HTML special characters in the text content - SAME AS ORIGINAL
-                    escaped_text = consecutive_chars.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                    
-                    # Add the formatted text - SAME AS ORIGINAL
-                    formatted_text = ''.join(open_tags) + escaped_text + ''.join(close_tags)
-                    html_parts.append(formatted_text)
-                    
-                    # Move to next unprocessed character
-                    i = j
-                    current_pos += consecutive_length
-                    
-                except Exception as e:
-                    # Fallback: just add the character without formatting - SAME AS ORIGINAL
-                    html_parts.append(char)
-                    i += 1
-                    current_pos += 1
-            
+                    except Exception as theme_error:
+                        # If both fail, we cannot determine the color
+                        # print(f"DEBUG: Could not read theme color for run '{run_text[:30]}...'. Error: {theme_error}")
+                        pass
+
+                # Add span tag if we found a valid, non-black color
+                if hex_color and hex_color.lower() != "#000000":
+                    open_tags.append(f'<span style="color: {hex_color}">')
+                    close_tags.insert(0, '</span>')
+
+                # Escape HTML special characters
+                escaped_text = run_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+                # Assemble the final HTML for this run
+                formatted_text = ''.join(open_tags) + escaped_text + ''.join(close_tags)
+                html_parts.append(formatted_text)
+
             return ''.join(html_parts)
-            
+
         except Exception as e:
-            # Fallback to plain text - SAME AS ORIGINAL
+            # Fallback to plain text on any error
+            print(f"Error in HTML conversion, falling back to plain text: {e}")
             return text_range.Text if hasattr(text_range, 'Text') else ""
     
     def get_shape_type_name(self, shape_type):
