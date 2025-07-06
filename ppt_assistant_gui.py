@@ -1,5 +1,8 @@
 import tkinter as tk
-from tkinter import filedialog, scrolledtext, messagebox
+from tkinter import filedialog, scrolledtext, messagebox, ttk
+import tkinter.font as tkfont
+import re
+import datetime
 
 import importlib.util
 import sys
@@ -41,11 +44,35 @@ class PPTAssistant:
         self.root.configure(bg=self.bg_color)
         
         # Configure window properties for modern look
-        self.root.geometry("900x700")
-        self.root.minsize(700, 500)
+        self.root.geometry("1200x800")  # Increased size for tabs
+        self.root.minsize(900, 600)
+
+        # Create main notebook for tabs
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Style the notebook
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('TNotebook', background=self.bg_color)
+        style.configure('TNotebook.Tab', padding=[12, 8], background=self.card_bg, foreground=self.sys_msg_fg)
+        style.map('TNotebook.Tab', background=[('selected', self.accent_color)], foreground=[('selected', '#000000')])
+
+        # Create Chat Tab
+        self.chat_frame = tk.Frame(self.notebook, bg=self.bg_color)
+        self.notebook.add(self.chat_frame, text="💬 Chat Assistant")
+        self.setup_chat_tab()
+
+        # Create Debug Tab
+        self.debug_frame = tk.Frame(self.notebook, bg=self.bg_color)
+        self.notebook.add(self.debug_frame, text="🔧 Debug Console")
+        self.setup_debug_tab()
+
+    def setup_chat_tab(self):
+        """Setup the chat interface tab"""
 
         # Main container with padding and modern styling
-        main_frame = tk.Frame(self.root, bg=self.bg_color)
+        main_frame = tk.Frame(self.chat_frame, bg=self.bg_color)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         # Header section
@@ -145,7 +172,7 @@ class PPTAssistant:
         self.code_display.bind("<Button-1>", lambda e: self.code_display.focus_set())  # Allow focus for selection
 
         # Modern input section
-        input_container = tk.Frame(self.root, bg=self.card_bg, relief="flat")
+        input_container = tk.Frame(self.chat_frame, bg=self.card_bg, relief="flat")
         input_container.pack(fill=tk.X, padx=20, pady=(0, 20))
 
         # Input frame with modern styling
@@ -222,6 +249,232 @@ class PPTAssistant:
         
         # Set placeholder text
         self.set_entry_placeholder()
+
+    def setup_debug_tab(self):
+        """Setup the debug console tab"""
+        # Main container with padding
+        main_frame = tk.Frame(self.debug_frame, bg=self.bg_color)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # Header section
+        header_frame = tk.Frame(main_frame, bg=self.card_bg, relief="flat")
+        header_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        # Add subtle border effect
+        header_border = tk.Frame(header_frame, bg="#dc2626", height=3)  # Red accent for debug
+        header_border.pack(fill=tk.X, side=tk.TOP)
+        
+        title_label = tk.Label(header_frame, text="🔧 Debug Console", 
+                              bg=self.card_bg, fg="#dc2626", 
+                              font=("Segoe UI", 18, "bold"), pady=15)
+        title_label.pack()
+
+        # Create horizontal container for left and right panels
+        content_frame = tk.Frame(main_frame, bg=self.bg_color)
+        content_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Left panel for code editor and controls
+        left_panel = tk.Frame(content_frame, bg=self.bg_color)
+        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+
+        # Right panel for slide context (fixed width)
+        right_panel = tk.Frame(content_frame, bg=self.card_bg, width=350, relief="flat")
+        right_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        right_panel.pack_propagate(False)  # Maintain fixed width
+
+        # === LEFT PANEL: Code Editor ===
+        # Code editor section
+        editor_container = tk.Frame(left_panel, bg=self.card_bg, relief="flat")
+        editor_container.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        
+        # Editor header
+        editor_header = tk.Frame(editor_container, bg=self.card_bg)
+        editor_header.pack(fill=tk.X, padx=15, pady=(15, 5))
+        
+        editor_title = tk.Label(editor_header, text="📝 Code Editor", 
+                               bg=self.card_bg, fg=self.sys_msg_fg, 
+                               font=("Segoe UI", 12, "bold"))
+        editor_title.pack(anchor="w")
+
+        # Toolbar for editor
+        toolbar_frame = tk.Frame(editor_header, bg=self.card_bg)
+        toolbar_frame.pack(fill=tk.X, pady=(5, 0))
+
+        # Example templates dropdown
+        template_label = tk.Label(toolbar_frame, text="Templates:", 
+                                 bg=self.card_bg, fg=self.sys_msg_fg, 
+                                 font=("Segoe UI", 9))
+        template_label.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.template_var = tk.StringVar(value="Select Template")
+        template_dropdown = ttk.Combobox(toolbar_frame, textvariable=self.template_var, 
+                                        values=[
+                                            "Select Template",
+                                            "Color Text Pattern Example",
+                                            "Debug Markdown Test",
+                                            "Replace Textbox Content Example",
+                                            "Modify Text in Textbox Example", 
+                                            "Add Text to Textbox Example",
+                                            "Format Textbox Style Example",
+                                            "Add New Textbox Example",
+                                            "Move and Resize Object Example",
+                                            "Get Object Properties Example",
+                                            "Copy Object to Slide Example",
+                                            "Duplicate Object Example"
+                                        ], 
+                                        state="readonly", width=30)
+        template_dropdown.pack(side=tk.LEFT, padx=(0, 10))
+        template_dropdown.bind('<<ComboboxSelected>>', self.load_template)
+
+        # Clear button
+        clear_btn = tk.Button(toolbar_frame, text="Clear", command=self.clear_debug_editor,
+                             bg=self.sys_msg_bg, fg=self.sys_msg_fg, font=("Segoe UI", 9),
+                             bd=0, padx=10, pady=5, cursor="hand2", relief="flat")
+        clear_btn.pack(side=tk.RIGHT, padx=(5, 0))
+
+        # Code editor area with undo/redo support
+        self.debug_editor = scrolledtext.ScrolledText(
+            editor_container, 
+            state='normal', 
+            width=80, 
+            height=25, 
+            bg=self.code_bg, 
+            fg=self.code_fg, 
+            font=("JetBrains Mono", 11) if self.is_font_available("JetBrains Mono") else ("Consolas", 11), 
+            bd=0, 
+            highlightthickness=1,
+            highlightcolor="#dc2626",
+            wrap=tk.NONE,  # No word wrap for code
+            padx=15,
+            pady=10,
+            relief="flat",
+            insertbackground="#dc2626",  # Red cursor
+            undo=True,  # Enable undo/redo
+            maxundo=50  # Set maximum undo levels
+        )
+        self.debug_editor.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 15))
+
+        # Bind undo/redo keys
+        self.debug_editor.bind('<Control-z>', lambda e: self.debug_editor.edit_undo())
+        self.debug_editor.bind('<Control-Z>', lambda e: self.debug_editor.edit_undo())
+        self.debug_editor.bind('<Control-y>', lambda e: self.debug_editor.edit_redo())
+        self.debug_editor.bind('<Control-Y>', lambda e: self.debug_editor.edit_redo())
+
+        # Control buttons section
+        controls_frame = tk.Frame(left_panel, bg=self.card_bg, relief="flat")
+        controls_frame.pack(fill=tk.X, pady=(0, 15))
+
+        button_frame = tk.Frame(controls_frame, bg=self.card_bg)
+        button_frame.pack(padx=15, pady=15)
+
+        # Execute button (prominent)
+        execute_btn = tk.Button(
+            button_frame, 
+            text="▶ Execute Code", 
+            command=self.execute_debug_code, 
+            bg="#059669",  # Green for execute
+            fg=self.btn_fg,
+            font=("Segoe UI", 12, "bold"), 
+            bd=0, 
+            padx=25,
+            pady=12,
+            cursor="hand2",
+            relief="flat",
+            activebackground="#047857",
+            activeforeground=self.btn_fg
+        )
+        execute_btn.pack(side=tk.LEFT, padx=(0, 10))
+
+        # Output section (much larger height)
+        output_container = tk.Frame(left_panel, bg=self.card_bg, relief="flat")
+        output_container.pack(fill=tk.BOTH, expand=True)
+        
+        # Output header
+        output_header = tk.Frame(output_container, bg=self.card_bg)
+        output_header.pack(fill=tk.X, padx=15, pady=(15, 5))
+        
+        output_title = tk.Label(output_header, text="📤 Output", 
+                               bg=self.card_bg, fg=self.sys_msg_fg, 
+                               font=("Segoe UI", 12, "bold"))
+        output_title.pack(anchor="w")
+
+        # Output area (much larger)
+        self.debug_output = scrolledtext.ScrolledText(
+            output_container, 
+            state='normal', 
+            width=80, 
+            height=20,  # Increased from 8 to 20
+            bg="#0f172a",  # Darker for output
+            fg="#e2e8f0", 
+            font=("JetBrains Mono", 10) if self.is_font_available("JetBrains Mono") else ("Consolas", 10), 
+            bd=0, 
+            highlightthickness=0, 
+            wrap=tk.WORD,
+            padx=15,
+            pady=10,
+            relief="flat"
+        )
+        self.debug_output.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 15))
+        
+        # Make output read-only but allow copy
+        self.debug_output.bind("<Key>", self.handle_debug_output_key_event)
+        self.debug_output.bind("<Button-1>", lambda e: self.debug_output.focus_set())
+
+        # === RIGHT PANEL: Slide Context ===
+        # Context header
+        context_header = tk.Frame(right_panel, bg=self.card_bg)
+        context_header.pack(fill=tk.X, padx=15, pady=(15, 5))
+        
+        # Add border effect for context panel
+        context_border = tk.Frame(context_header, bg=self.btn_bg, height=2)
+        context_border.pack(fill=tk.X, side=tk.TOP, pady=(0, 10))
+        
+        context_title = tk.Label(context_header, text="� Current Slide Context", 
+                                bg=self.card_bg, fg=self.sys_msg_fg, 
+                                font=("Segoe UI", 12, "bold"))
+        context_title.pack(anchor="w")
+
+        # Refresh context button
+        refresh_context_btn = tk.Button(
+            context_header, 
+            text="🔄 Refresh Context", 
+            command=self.refresh_slide_context, 
+            bg=self.btn_bg, 
+            fg=self.btn_fg,
+            font=("Segoe UI", 9, "bold"), 
+            bd=0, 
+            padx=15,
+            pady=8,
+            cursor="hand2",
+            relief="flat",
+            activebackground=self.btn_hover_bg,
+            activeforeground=self.btn_fg
+        )
+        refresh_context_btn.pack(anchor="w", pady=(5, 0))
+
+        # Context display area (vertical wide format)
+        self.context_display = scrolledtext.ScrolledText(
+            right_panel, 
+            state='normal', 
+            width=40,
+            bg="#1e293b",  # Slightly different shade
+            fg="#f1f5f9", 
+            font=("JetBrains Mono", 9) if self.is_font_available("JetBrains Mono") else ("Consolas", 9), 
+            bd=0, 
+            highlightthickness=0, 
+            wrap=tk.WORD,
+            padx=10,
+            pady=10,
+            relief="flat"
+        )
+        self.context_display.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 15))
+        
+        # Make context display read-only but allow copy
+        self.context_display.bind("<Key>", self.handle_debug_output_key_event)
+        self.context_display.bind("<Button-1>", lambda e: self.context_display.focus_set())
+
+        # Auto-refresh context on tab switch
+        self.notebook.bind('<<NotebookTabChanged>>', self.on_tab_changed)
 
     def is_font_available(self, font_name):
         """Check if a font is available on the system."""
@@ -308,6 +561,395 @@ class PPTAssistant:
         return "break"
 
     def handle_code_key_event(self, event):
+        """Handle key events for code display area - allow copy operations but prevent typing."""
+        # Allow copy operations (Ctrl+C, Ctrl+A for select all)
+        if event.state & 0x4:  # Ctrl key is pressed
+            if event.keysym in ['c', 'C', 'a', 'A']:
+                return  # Allow these operations
+        
+        # Allow navigation keys
+        if event.keysym in ['Up', 'Down', 'Left', 'Right', 'Home', 'End', 'Prior', 'Next']:
+            return  # Allow arrow keys and navigation
+            
+        # Block all other key events (typing)
+        return "break"
+
+    def handle_debug_output_key_event(self, event):
+        """Handle key events for debug output area - allow copy operations but prevent typing."""
+        # Allow copy operations (Ctrl+C, Ctrl+A for select all)
+        if event.state & 0x4:  # Ctrl key is pressed
+            if event.keysym in ['c', 'C', 'a', 'A']:
+                return  # Allow these operations
+        
+        # Allow navigation keys
+        if event.keysym in ['Up', 'Down', 'Left', 'Right', 'Home', 'End', 'Prior', 'Next']:
+            return  # Allow arrow keys and navigation
+            
+        # Block all other key events (typing)
+        return "break"
+
+    def load_template(self, event=None):
+        """Load a code template into the debug editor"""
+        template = self.template_var.get()
+        
+        templates = {
+            "Color Text Pattern Example": '''# Example: Make 'League of Legends' text green italic and 'Valorant' text red italic
+# First, get the textbox ID from slide context (check the right panel)
+
+# TEST: Simple color without italic first
+modify_text_in_textbox(
+    id=123,  # Replace with actual textbox ID from slide context
+    find_pattern=r"\\bLeague of Legends\\b",  
+    replacement_text="{color:#22c55e}League of Legends{/color}",  # Green color only
+    regex_flags="IGNORECASE"
+)
+
+# TEST: Simple color without italic first
+modify_text_in_textbox(
+    id=123,  # Replace with actual textbox ID from slide context
+    find_pattern=r"\\bValorant\\b",
+    replacement_text="{color:#ef4444}Valorant{/color}",  # Red color only
+    regex_flags="IGNORECASE"
+)
+
+# If above works, then try with italic:
+# modify_text_in_textbox(
+#     id=123,
+#     find_pattern=r"\\bLeague of Legends\\b",
+#     replacement_text="{color:#22c55e}*League of Legends*{/color}",  # Green + italic
+#     regex_flags="IGNORECASE"
+# )
+
+print("Check if colors are applied correctly before adding italic formatting")''',
+            
+            "Debug Markdown Test": '''# Debug: Test markdown parsing step by step
+
+# Test 1: Simple replacement without any formatting
+modify_text_in_textbox(
+    id=123,  # Replace with actual textbox ID
+    find_pattern=r"League of Legends",
+    replacement_text="LEAGUE_REPLACED",  # No markdown, just plain text
+    regex_flags="IGNORECASE"
+)
+
+# Test 2: Simple color formatting
+modify_text_in_textbox(
+    id=123,
+    find_pattern=r"Valorant", 
+    replacement_text="{color:#ff0000}Valorant{/color}",  # Simple red
+    regex_flags="IGNORECASE"
+)
+
+# Test 3: Simple italic formatting  
+modify_text_in_textbox(
+    id=123,
+    find_pattern=r"🤔",
+    replacement_text="*thinking*",  # Simple italic
+    regex_flags="IGNORECASE"
+)
+
+print("=== Debug Results ===")
+print("Step 1: Did 'League of Legends' become 'LEAGUE_REPLACED'?")
+print("Step 2: Did 'Valorant' turn red?") 
+print("Step 3: Did emoji become italic 'thinking'?")''',
+            
+            "Replace Textbox Content Example": '''# Example: Completely replace all text in a textbox
+replace_textbox_content(
+    id=123,  # Replace with actual textbox ID from slide context
+    markdown_text="**NEW TITLE: Battle of the Games** 🎮\\n\\n• **League of Legends:** {color:purple}Strategic MOBA{/color}\\n• **Valorant:** {color:orange}Tactical FPS{/color}\\n\\nWhich will you choose?",
+    font_size=16,
+    text_align="center"
+)''',
+            
+            "Modify Text in Textbox Example": '''# Example: Find and replace specific text while keeping everything else
+# This preserves all existing text and only changes what you specify
+
+# Change "deep strategy" to "complex strategy" with emphasis
+modify_text_in_textbox(
+    id=123,  # Replace with actual textbox ID
+    find_pattern=r"deep strategy",
+    replacement_text="**complex strategy**",
+    regex_flags="IGNORECASE"
+)
+
+# Change "tactical shooting" to "precision shooting" with color
+modify_text_in_textbox(
+    id=123,
+    find_pattern=r"tactical shooting",
+    replacement_text="{color:red}**precision shooting**{/color}",
+    regex_flags="IGNORECASE"
+)
+
+# Make any question text bold and blue
+modify_text_in_textbox(
+    id=123,
+    find_pattern=r"Who will dominate\\? Choose your side!",
+    replacement_text="{color:blue}**Who will dominate? Choose your side!**{/color}",
+    regex_flags="IGNORECASE"
+)''',
+            
+            "Add Text to Textbox Example": '''# Example: Add text to beginning or end of existing content
+
+# Add text to the beginning
+add_text_to_textbox(
+    id=123,  # Replace with actual textbox ID
+    markdown_text="🔥 **EPIC GAMING SHOWDOWN** 🔥\\n\\n",
+    position="start"
+)
+
+# Add text to the end
+add_text_to_textbox(
+    id=123,  # Replace with actual textbox ID
+    markdown_text="\\n\\n{color:gray}*Join the debate in the comments!*{/color}",
+    position="end"
+)''',
+            
+            "Format Textbox Style Example": '''# Example: Change visual formatting without modifying text content
+
+# Change font and alignment
+format_textbox_style(
+    id=123,  # Replace with actual textbox ID
+    font_name="Arial Black",  # Make it bold/dramatic
+    font_size=18,  # Larger text
+    text_align="center",
+    line_spacing=1.5  # More space between lines
+)
+
+# Add margins for better spacing
+format_textbox_style(
+    id=123,
+    left_margin=20,
+    right_margin=20,
+    top_margin=15,
+    bottom_margin=15
+)''',
+            
+            "Add New Textbox Example": '''# Example: Add a completely new textbox to the slide
+add_textbox(
+    slide_idx=1,  # Current slide
+    markdown_text="**🎯 GAME STATS COMPARISON** 🎯\\n\\n• **League:** 150M+ monthly players\\n• **Valorant:** 15M+ monthly players\\n\\n{color:green}League wins in numbers!{/color}",
+    left=500,  # Position on right side
+    top=100,
+    width=400,
+    height=200,
+    font_size=12,
+    text_align="left"
+)''',
+            
+            "Move and Resize Object Example": '''# Example: Reposition and resize objects on the slide
+
+# Move an object to new position
+move_object(
+    id=123,  # Replace with actual object ID
+    left=100,  # Move to left side
+    top=50    # Move to top
+)
+
+# Resize an object
+resize_object(
+    id=123,  # Replace with actual object ID
+    width=600,  # Make wider
+    height=300  # Make taller
+)
+
+# Or do both at once
+position_and_resize_object(
+    id=123,  # Replace with actual object ID
+    left=200,
+    top=100,
+    width=500,
+    height=250
+)''',
+            
+            "Get Object Properties Example": '''# Example: Inspect any object to see its properties
+props = get_object_properties(id=123)  # Replace with actual object ID
+print(f"Object properties: {props}")
+
+# This will show:
+# - Object type (TextBox, Picture, Shape, etc.)
+# - Position (left, top)
+# - Size (width, height)
+# - Text content (if applicable)
+# - Slide number
+# - Object name and ID''',
+            
+            "Copy Object to Slide Example": '''# Example: Copy an object to another slide
+
+# Copy textbox to slide 2 at same position
+new_id = copy_object_to_slide(
+    id=123,  # Replace with actual object ID
+    target_slide_idx=2
+)
+print(f"Copied object to slide 2, new ID: {new_id}")
+
+# Copy and position at specific coordinates
+new_id = copy_object_to_slide(
+    id=123,  # Replace with actual object ID
+    target_slide_idx=3,
+    new_left=300,
+    new_top=200
+)
+print(f"Copied and positioned object on slide 3, new ID: {new_id}")''',
+            
+            "Duplicate Object Example": '''# Example: Duplicate an object on the same slide
+
+# Duplicate with default offset (20 points right and down)
+new_id = duplicate_object_on_same_slide(
+    id=123  # Replace with actual object ID
+)
+print(f"Duplicated object, new ID: {new_id}")
+
+# Duplicate with custom offset
+new_id = duplicate_object_on_same_slide(
+    id=123,  # Replace with actual object ID
+    offset_left=50,  # Move 50 points right
+    offset_top=100   # Move 100 points down
+)
+print(f"Duplicated with custom offset, new ID: {new_id}")
+
+# Then you can modify the duplicate differently
+modify_text_in_textbox(
+    id=new_id,
+    find_pattern=r"League of Legends",
+    replacement_text="{color:gold}**LEAGUE OF LEGENDS**{/color}",
+    regex_flags="IGNORECASE"
+)'''
+        }
+        
+        if template in templates:
+            self.debug_editor.delete(1.0, tk.END)
+            self.debug_editor.insert(1.0, templates[template])
+
+    def clear_debug_editor(self):
+        """Clear the debug editor"""
+        self.debug_editor.delete(1.0, tk.END)
+        self.debug_output.delete(1.0, tk.END)
+
+    def refresh_slide_context(self):
+        """Refresh the slide context display in the right panel"""
+        try:
+            self.ensure_ppt()
+            if self.presentation is None:
+                self.context_display.delete(1.0, tk.END)
+                self.context_display.insert(tk.END, "❌ No presentation open.\n\nPlease create or open a presentation first.")
+                return
+            
+            # Get slide context using the agent's context reader
+            context = ppt_smolagent.get_current_slide_context()
+            
+            self.context_display.delete(1.0, tk.END)
+            self.context_display.insert(tk.END, f"🔄 Updated: {datetime.datetime.now().strftime('%H:%M:%S')}\n")
+            self.context_display.insert(tk.END, "="*40 + "\n\n")
+            self.context_display.insert(tk.END, context)
+            
+            # Auto-scroll to top
+            self.context_display.see("1.0")
+            
+        except Exception as e:
+            self.context_display.delete(1.0, tk.END)
+            self.context_display.insert(tk.END, f"❌ Error getting slide context:\n\n{str(e)}")
+
+    def on_tab_changed(self, event):
+        """Handle tab change events"""
+        selected_tab = self.notebook.select()
+        tab_text = self.notebook.tab(selected_tab, "text")
+        
+        # Auto-refresh context when switching to debug tab
+        if "Debug Console" in tab_text:
+            # Small delay to ensure tab is fully loaded
+            self.root.after(100, self.refresh_slide_context)
+
+    def get_slide_context(self):
+        """Get current slide context and display in output (legacy method for backward compatibility)"""
+        try:
+            self.ensure_ppt()
+            if self.presentation is None:
+                self.debug_output.delete(1.0, tk.END)
+                self.debug_output.insert(tk.END, "❌ No presentation open. Please create or open a presentation first.\n")
+                return
+            
+            # Get slide context using the agent's context reader
+            context = ppt_smolagent.get_current_slide_context()
+            
+            self.debug_output.delete(1.0, tk.END)
+            self.debug_output.insert(tk.END, "📋 Current Slide Context:\n")
+            self.debug_output.insert(tk.END, "="*50 + "\n")
+            self.debug_output.insert(tk.END, context)
+            self.debug_output.insert(tk.END, "\n" + "="*50 + "\n")
+            
+            # Also update the context panel
+            self.refresh_slide_context()
+            
+        except Exception as e:
+            self.debug_output.delete(1.0, tk.END)
+            self.debug_output.insert(tk.END, f"❌ Error getting slide context: {str(e)}\n")
+
+    def execute_debug_code(self):
+        """Execute the code in the debug editor"""
+        code = self.debug_editor.get(1.0, tk.END).strip()
+        
+        if not code:
+            self.debug_output.delete(1.0, tk.END)
+            self.debug_output.insert(tk.END, "⚠️ No code to execute. Please enter some code first.\n")
+            return
+        
+        try:
+            self.ensure_ppt()
+            if self.presentation is None:
+                self.debug_output.delete(1.0, tk.END)
+                self.debug_output.insert(tk.END, "❌ No presentation open. Please create or open a presentation first.\n")
+                return
+            
+            self.debug_output.delete(1.0, tk.END)
+            self.debug_output.insert(tk.END, "🚀 Executing code...\n")
+            self.debug_output.insert(tk.END, "="*50 + "\n")
+            self.root.update()  # Force UI update
+            
+            # Import the tools into the execution namespace
+            import ppt_smolagent
+            
+            # Create execution namespace with all the tools
+            exec_namespace = {
+                # New improved tools
+                'add_textbox': ppt_smolagent.add_textbox,
+                'replace_textbox_content': ppt_smolagent.replace_textbox_content,
+                'modify_text_in_textbox': ppt_smolagent.modify_text_in_textbox,
+                'add_text_to_textbox': ppt_smolagent.add_text_to_textbox,
+                'format_textbox_style': ppt_smolagent.format_textbox_style,
+                'move_object': ppt_smolagent.move_object,
+                'resize_object': ppt_smolagent.resize_object,
+                'position_and_resize_object': ppt_smolagent.position_and_resize_object,
+                'get_object_properties': ppt_smolagent.get_object_properties,
+                'copy_object_to_slide': ppt_smolagent.copy_object_to_slide,
+                'duplicate_object_on_same_slide': ppt_smolagent.duplicate_object_on_same_slide,
+                'delete_object': ppt_smolagent.delete_object,
+                # Legacy tools for backward compatibility (if they still exist)
+                'update_textbox': getattr(ppt_smolagent, 'update_textbox', None),
+                'format_text_pattern': getattr(ppt_smolagent, 'format_text_pattern', None),
+                'duplicate_object': getattr(ppt_smolagent, 'duplicate_object', None),
+                # Utility functions
+                'print': lambda *args: self.debug_print(*args)
+            }
+            
+            # Execute the code
+            try:
+                exec(code, exec_namespace)
+                self.debug_output.insert(tk.END, "\n✅ Code executed successfully!\n")
+            except Exception as e:
+                self.debug_output.insert(tk.END, f"\n❌ Execution error: {str(e)}\n")
+                import traceback
+                self.debug_output.insert(tk.END, f"Traceback:\n{traceback.format_exc()}\n")
+                
+        except Exception as e:
+            self.debug_output.insert(tk.END, f"❌ Setup error: {str(e)}\n")
+    
+    def debug_print(self, *args):
+        """Custom print function for debug console"""
+        message = " ".join(str(arg) for arg in args)
+        self.debug_output.insert(tk.END, message + "\n")
+        self.debug_output.see(tk.END)
+
+    def handle_code_key_event_debug(self, event):
         """Handle key events for code display area - allow copy operations but prevent typing."""
         # Allow copy operations (Ctrl+C, Ctrl+A for select all)
         if event.state & 0x4:  # Ctrl key is pressed

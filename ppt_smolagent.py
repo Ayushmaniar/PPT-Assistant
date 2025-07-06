@@ -1,10 +1,13 @@
 from smolagents import CodeAgent, tool, OpenAIServerModel
 from smolagents.monitoring import LogLevel
 import os
+import re
 from dotenv import load_dotenv
 import logging
 import io
 import sys
+import win32com.client
+import pythoncom
 from slide_context_reader import PowerPointSlideReader
 
 # Load environment variables from .env file
@@ -22,102 +25,255 @@ model = OpenAIServerModel(
     api_base = "https://api.openai.com/v1"
 )
 
+# Import markdown processing functions
+from markdown_processor import parse_markdown_text, process_markdown_lists, apply_markdown_formatting
+
 # Tool to add a textbox to a PowerPoint slide
 @tool
-def add_textbox_tool(slide_idx: int = 1, text: str = "Sample Text", left: int = 100, top: int = 100, width: int = 400, height: int = 50, font_size: int = None, font_name: str = None, font_bold: bool = None, font_italic: bool = None, text_align: str = "left") -> str:
+def add_textbox(slide_idx: int = 1, markdown_text: str = "**Sample Text**", left: int = 100, top: int = 100, width: int = 400, height: int = 50, font_size: int = None, font_name: str = None, text_align: str = "left") -> str:
     """
-    Add a textbox to a PowerPoint slide with customizable text and formatting.
+    Add a textbox to a PowerPoint slide with markdown-formatted text.
+    Markdown Syntax Supported:
+        **bold text** or __bold text__ - Bold formatting
+        *italic text* or _italic text_ - Italic formatting
+        ~~strikethrough~~ - Strikethrough formatting
+        [u]underlined[/u] - Underlined text
+        {color:red}colored text{/color} - Colored text (hex #FF0000 or names)
+        {bg:yellow}highlighted{/bg} - Background color
+        - bullet point or * bullet point - Bullet lists
+        1. numbered item - Numbered lists
+        # Header 1, ## Header 2, ### Header 3 - Headers
     
     Args:
         slide_idx: The slide number (1-indexed) to add the textbox to
-        text: The text content for the textbox
+        markdown_text: The markdown-formatted text content for the textbox
         left: Left position of the textbox in points
         top: Top position of the textbox in points
         width: Width of the textbox in points
         height: Height of the textbox in points
-        font_size: Font size for the text (optional)
+        font_size: Base font size for the text (optional, headers will be larger)
         font_name: Font name for the text (optional)
-        font_bold: Whether to make the text bold (optional)
-        font_italic: Whether to make the text italic (optional)
         text_align: Text alignment - "left", "center", or "right" (default: "left")
     
     Returns:
         str: Confirmation message of the textbox addition
     """
-    import win32com.client, pythoncom
     pythoncom.CoInitialize()
-    ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
-    presentation = ppt_app.ActivePresentation
-    if presentation.Slides.Count < slide_idx:
-        slide = presentation.Slides.Add(slide_idx, 12)  # 12 = ppLayoutBlank
-    else:
-        slide = presentation.Slides(slide_idx)
-    box = slide.Shapes.AddTextbox(1, left, top, width, height)
-    box.TextFrame.TextRange.Text = text
-    if font_size:
-        box.TextFrame.TextRange.Font.Size = font_size
-    if font_name:
-        box.TextFrame.TextRange.Font.Name = font_name
-    if font_bold is not None:
-        box.TextFrame.TextRange.Font.Bold = -1 if font_bold else 0
-    if font_italic is not None:
-        box.TextFrame.TextRange.Font.Italic = -1 if font_italic else 0
     
-    # Set text alignment
-    # PowerPoint alignment constants: 1 = left, 2 = center, 3 = right
-    alignment_map = {
-        "left": 1,
-        "center": 2, 
-        "right": 3
-    }
-    
-    if text_align.lower() in alignment_map:
-        box.TextFrame.TextRange.ParagraphFormat.Alignment = alignment_map[text_align.lower()]
-    
-    # Clear slide context cache to ensure fresh context on next request
     try:
-        from slide_context_reader import PowerPointSlideReader
-        # Get the global slide reader and clear its cache
-        reader = get_slide_reader()
-        if reader:
-            reader.clear_context_cache()
+        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+        presentation = ppt_app.ActivePresentation
+        
+        # Add slide if needed
+        if presentation.Slides.Count < slide_idx:
+            slide = presentation.Slides.Add(slide_idx, 12)  # 12 = ppLayoutBlank
+        else:
+            slide = presentation.Slides(slide_idx)
+        
+        # Process markdown (always enabled now)
+        # First process lists and headers
+        processed_text, list_info = process_markdown_lists(markdown_text)
+        
+        # Then process inline formatting
+        plain_text, format_segments = parse_markdown_text(processed_text)
+        
+        # Create the textbox
+        box = slide.Shapes.AddTextbox(1, left, top, width, height)
+        text_range = box.TextFrame.TextRange
+        
+        # Apply markdown formatting
+        apply_markdown_formatting(text_range, plain_text, format_segments)
+        
+        # Apply header formatting
+        for info in list_info:
+            if info['type'] == 'header':
+                try:
+                    # Calculate line position in the text
+                    lines = plain_text.split('\n')
+                    if info['line'] < len(lines):
+                        line_start = sum(len(lines[i]) + 1 for i in range(info['line'])) + 1
+                        line_length = len(lines[info['line']])
+                        
+                        if line_length > 0:
+                            header_range = text_range.Characters(line_start, line_length)
+                            
+                            # Apply header formatting based on level
+                            level = info['level']
+                            if level == 1:
+                                header_range.Font.Size = (font_size or 14) + 8
+                                header_range.Font.Bold = -1
+                            elif level == 2:
+                                header_range.Font.Size = (font_size or 14) + 4
+                                header_range.Font.Bold = -1
+                            elif level == 3:
+                                header_range.Font.Size = (font_size or 14) + 2
+                                header_range.Font.Bold = -1
+                except Exception as e:
+                    print(f"Warning: Could not apply header formatting: {e}")
+        
+        # Apply global font settings (font_name and base font_size for non-headers)
+        if font_name:
+            text_range.Font.Name = font_name
+        
+        # Set text alignment
+        alignment_map = {
+            "left": 1,
+            "center": 2, 
+            "right": 3
+        }
+        
+        if text_align.lower() in alignment_map:
+            text_range.ParagraphFormat.Alignment = alignment_map[text_align.lower()]
+        
+        # Clear slide context cache to ensure fresh context on next request
+        try:
+            from slide_context_reader import PowerPointSlideReader
+            reader = get_slide_reader()
+            if reader:
+                reader.clear_context_cache()
+        except Exception as e:
+            pass  # Silently continue if cache clearing fails
+        
+        return f"Textbox added to slide {slide_idx} with markdown formatting: {plain_text[:50]}{'...' if len(plain_text) > 50 else ''}"
+        
     except Exception as e:
-        pass  # Silently continue if cache clearing fails
-    
-    return f"Textbox added to slide {slide_idx} with text: {text}"
+        return f"Error adding textbox: {str(e)}"
 
 @tool
-def update_textbox_tool(id: int, text: str = None, text_operation: str = "replace", start_char: int = None, end_char: int = None, font_size: int = None, font_name: str = None, font_bold: bool = None, font_italic: bool = None, font_underline: bool = None, font_strikethrough: bool = None, font_color: str = None, background_color: str = None, text_align: str = None, line_spacing: float = None, char_spacing: float = None, left_margin: float = None, right_margin: float = None, top_margin: float = None, bottom_margin: float = None) -> str:
+def replace_textbox_content(id: int, markdown_text: str, font_size: int = None, font_name: str = None, text_align: str = None) -> str:
     """
-    Update text content and formatting properties of an existing textbox by ID.
+    COMPLETELY REPLACE all text content in a textbox with new markdown-formatted text.
+    
+    Use this when you want to completely overwrite the existing text content.
+    All existing text will be deleted and replaced with the new content.
+    
+    Markdown Syntax Supported:
+        **bold text** - Bold formatting
+        *italic text* - Italic formatting
+        ~~strikethrough~~ - Strikethrough formatting
+        [u]underlined[/u] - Underlined text
+        {color:red}colored text{/color} - Colored text (hex #FF0000 or names)
+        {bg:yellow}highlighted{/bg} - Background color
+        - bullet point - Bullet lists
+        1. numbered item - Numbered lists
+        # Header 1, ## Header 2, ### Header 3 - Headers
     
     Args:
         id: The ID of the textbox to update
-        text: New text content (optional)
-        text_operation: How to apply text - "replace", "append", or "prepend" (default: "replace")
-        start_char: Start character position for range formatting (1-indexed, optional)
-        end_char: End character position for range formatting (1-indexed, optional)
-        font_size: Font size in points (optional)
-        font_name: Font name (optional)
-        font_bold: Whether text should be bold (optional)
-        font_italic: Whether text should be italic (optional)
-        font_underline: Whether text should be underlined (optional)
-        font_strikethrough: Whether text should have strikethrough (optional)
-        font_color: Font color in hex format like "#FF0000" for red (optional)
-        background_color: Background color in hex format (optional)
-        text_align: Text alignment - "left", "center", "right", or "justify" (optional)
-        line_spacing: Line spacing multiplier (1.0 = single, 1.5 = 1.5x, etc.) (optional)
-        char_spacing: Character spacing in points (optional)
-        left_margin: Left margin in points (optional)
-        right_margin: Right margin in points (optional)
-        top_margin: Top margin in points (optional)
-        bottom_margin: Bottom margin in points (optional)
+        markdown_text: New markdown-formatted text content (replaces ALL existing text)
+        font_size: Base font size in points (headers will be larger)
+        font_name: Font name for the text
+        text_align: Text alignment - "left", "center", "right", or "justify"
     
     Returns:
         str: Confirmation message with details of what was updated
     """
-    import win32com.client, pythoncom
+    return _update_textbox_internal(
+        id=id,
+        markdown_text=markdown_text,
+        text_operation="replace",
+        font_size=font_size,
+        font_name=font_name,
+        text_align=text_align
+    )
+
+@tool
+def modify_text_in_textbox(id: int, find_pattern: str, replacement_text: str, regex_flags: str = "IGNORECASE") -> str:
+    """
+    Find and replace specific text patterns within a textbox while preserving all other text.
+    
+    This tool modifies only the matching text and keeps everything else unchanged.
+    Perfect for tasks like "make 'Company Name' bold" or "change all dates to red".
+    
+    Args:
+        id: The ID of the textbox to modify
+        find_pattern: Text pattern to find (can be plain text or regex)
+        replacement_text: Markdown-formatted text to replace matches with.
+            Use markdown syntax like "**bold**", "*italic*", "{color:red}text{/color}" etc.
+            Set to empty string ("") to delete the matched text.
+        regex_flags: Regex flags like "IGNORECASE" (default: "IGNORECASE")
+    
+    Returns:
+        str: Confirmation message with details of what was replaced
+    """
+    return _update_textbox_internal(
+        id=id,
+        regex_finder=find_pattern,
+        replacement_text=replacement_text,
+        regex_flags=regex_flags
+    )
+
+@tool
+def add_text_to_textbox(id: int, markdown_text: str, position: str = "end") -> str:
+    """
+    Add new text to the beginning or end of existing textbox content.
+    
+    This tool preserves all existing text and adds new content before or after it.
+    
+    Args:
+        id: The ID of the textbox to modify
+        markdown_text: Markdown-formatted text to add
+        position: Where to add the text - "start" (beginning) or "end" (default)
+    
+    Returns:
+        str: Confirmation message with details of what was added
+    """
+    operation = "prepend" if position == "start" else "append"
+    return _update_textbox_internal(
+        id=id,
+        markdown_text=markdown_text,
+        text_operation=operation
+    )
+
+@tool
+def format_textbox_style(id: int, font_size: int = None, font_name: str = None, text_align: str = None, 
+                        line_spacing: float = None, left_margin: float = None, right_margin: float = None, 
+                        top_margin: float = None, bottom_margin: float = None) -> str:
+    """
+    Change the formatting and layout properties of a textbox without modifying text content.
+    
+    Use this to adjust visual appearance like font, alignment, spacing, and margins.
+    
+    Args:
+        id: The ID of the textbox to format
+        font_size: Base font size in points
+        font_name: Font name for the text
+        text_align: Text alignment - "left", "center", "right", or "justify"
+        line_spacing: Line spacing multiplier (1.0 = single, 1.5 = 1.5x, etc.)
+        left_margin: Left margin in points
+        right_margin: Right margin in points
+        top_margin: Top margin in points
+        bottom_margin: Bottom margin in points
+    
+    Returns:
+        str: Confirmation message with details of formatting changes
+    """
+    return _update_textbox_internal(
+        id=id,
+        font_size=font_size,
+        font_name=font_name,
+        text_align=text_align,
+        line_spacing=line_spacing,
+        left_margin=left_margin,
+        right_margin=right_margin,
+        top_margin=top_margin,
+        bottom_margin=bottom_margin
+    )
+
+def _update_textbox_internal(id: int, markdown_text: str = None, text_operation: str = "replace", regex_finder: str = None, replacement_text: str = None, regex_flags: str = "IGNORECASE", font_size: int = None, font_name: str = None, text_align: str = None, line_spacing: float = None, left_margin: float = None, right_margin: float = None, top_margin: float = None, bottom_margin: float = None) -> str:
+    """
+    Internal implementation for textbox updates. Do not call directly.
+    """
     pythoncom.CoInitialize()
+    
+    # INPUT VALIDATION: Prevent conflicting parameter combinations
+    if markdown_text is not None and text_operation == "replace" and regex_finder is not None:
+        return f"ERROR: Cannot use both 'markdown_text' with operation='replace' AND 'regex_finder'. Choose ONE approach:\n" \
+               f"- For complete text replacement: use 'markdown_text' parameter only\n" \
+               f"- For partial text replacement: use 'regex_finder' + 'replacement_text' only"
+    
+    if regex_finder and not replacement_text:
+        return f"ERROR: When using 'regex_finder', you must specify 'replacement_text' for the replacement."
     
     try:
         ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
@@ -143,98 +299,255 @@ def update_textbox_tool(id: int, text: str = None, text_operation: str = "replac
         if not hasattr(target_shape, 'TextFrame'):
             return f"Shape with ID {id} is not a textbox or doesn't support text"
         
-        if not target_shape.TextFrame.HasText and not text:
+        if not target_shape.TextFrame.HasText and not markdown_text:
             return f"Shape with ID {id} has no text and no new text provided"
         
         updates_made = []
         
         # Handle text content updates
-        if text is not None:
+        if markdown_text is not None:
             current_text = target_shape.TextFrame.TextRange.Text if target_shape.TextFrame.HasText else ""
             
             if text_operation == "replace":
-                target_shape.TextFrame.TextRange.Text = text
-                updates_made.append(f"replaced text with '{text}'")
+                # Process markdown and apply formatting
+                processed_text, list_info = process_markdown_lists(markdown_text)
+                plain_text, format_segments = parse_markdown_text(processed_text)
+                apply_markdown_formatting(target_shape.TextFrame.TextRange, plain_text, format_segments)
+                
+                # Apply header formatting
+                for info in list_info:
+                    if info['type'] == 'header':
+                        try:
+                            # Calculate line position in the text
+                            lines = plain_text.split('\n')
+                            if info['line'] < len(lines):
+                                line_start = sum(len(lines[i]) + 1 for i in range(info['line'])) + 1
+                                line_length = len(lines[info['line']])
+                                
+                                if line_length > 0:
+                                    header_range = target_shape.TextFrame.TextRange.Characters(line_start, line_length)
+                                    
+                                    # Apply header formatting based on level
+                                    level = info['level']
+                                    if level == 1:
+                                        header_range.Font.Size = (font_size or 14) + 8
+                                        header_range.Font.Bold = -1
+                                    elif level == 2:
+                                        header_range.Font.Size = (font_size or 14) + 4
+                                        header_range.Font.Bold = -1
+                                    elif level == 3:
+                                        header_range.Font.Size = (font_size or 14) + 2
+                                        header_range.Font.Bold = -1
+                        except Exception as e:
+                            print(f"Warning: Could not apply header formatting: {e}")
+                
+                updates_made.append(f"replaced text with markdown-formatted content")
+                    
             elif text_operation == "append":
-                new_text = current_text + text
-                target_shape.TextFrame.TextRange.Text = new_text
-                updates_made.append(f"appended '{text}'")
+                # For append/prepend, we need to process the combined text to apply markdown formatting
+                combined_text = current_text + markdown_text
+                
+                # Process the combined markdown text
+                processed_text, list_info = process_markdown_lists(combined_text)
+                plain_text, format_segments = parse_markdown_text(processed_text)
+                apply_markdown_formatting(target_shape.TextFrame.TextRange, plain_text, format_segments)
+                
+                # Apply header formatting if any headers are present
+                for info in list_info:
+                    if info['type'] == 'header':
+                        try:
+                            # Calculate line position in the text
+                            lines = plain_text.split('\n')
+                            if info['line'] < len(lines):
+                                line_start = sum(len(lines[i]) + 1 for i in range(info['line'])) + 1
+                                line_length = len(lines[info['line']])
+                                
+                                if line_length > 0:
+                                    header_range = target_shape.TextFrame.TextRange.Characters(line_start, line_length)
+                                    
+                                    # Apply header formatting based on level
+                                    level = info['level']
+                                    if level == 1:
+                                        header_range.Font.Size = (font_size or 14) + 8
+                                        header_range.Font.Bold = -1
+                                    elif level == 2:
+                                        header_range.Font.Size = (font_size or 14) + 4
+                                        header_range.Font.Bold = -1
+                                    elif level == 3:
+                                        header_range.Font.Size = (font_size or 14) + 2
+                                        header_range.Font.Bold = -1
+                        except Exception as e:
+                            print(f"Warning: Could not apply header formatting: {e}")
+                
+                updates_made.append(f"appended markdown-formatted text: '{markdown_text[:30]}{'...' if len(markdown_text) > 30 else ''}'")
+                
             elif text_operation == "prepend":
-                new_text = text + current_text
-                target_shape.TextFrame.TextRange.Text = new_text
-                updates_made.append(f"prepended '{text}'")
+                # For prepend, we need to process the combined text to apply markdown formatting
+                combined_text = markdown_text + current_text
+                
+                # Process the combined markdown text
+                processed_text, list_info = process_markdown_lists(combined_text)
+                plain_text, format_segments = parse_markdown_text(processed_text)
+                apply_markdown_formatting(target_shape.TextFrame.TextRange, plain_text, format_segments)
+                
+                # Apply header formatting if any headers are present
+                for info in list_info:
+                    if info['type'] == 'header':
+                        try:
+                            # Calculate line position in the text
+                            lines = plain_text.split('\n')
+                            if info['line'] < len(lines):
+                                line_start = sum(len(lines[i]) + 1 for i in range(info['line'])) + 1
+                                line_length = len(lines[info['line']])
+                                
+                                if line_length > 0:
+                                    header_range = target_shape.TextFrame.TextRange.Characters(line_start, line_length)
+                                    
+                                    # Apply header formatting based on level
+                                    level = info['level']
+                                    if level == 1:
+                                        header_range.Font.Size = (font_size or 14) + 8
+                                        header_range.Font.Bold = -1
+                                    elif level == 2:
+                                        header_range.Font.Size = (font_size or 14) + 4
+                                        header_range.Font.Bold = -1
+                                    elif level == 3:
+                                        header_range.Font.Size = (font_size or 14) + 2
+                                        header_range.Font.Bold = -1
+                        except Exception as e:
+                            print(f"Warning: Could not apply header formatting: {e}")
+                
+                updates_made.append(f"prepended markdown-formatted text: '{markdown_text[:30]}{'...' if len(markdown_text) > 30 else ''}'")
         
-        # Determine which text range to format
-        if start_char is not None and end_char is not None:
-            # Format specific character range
-            if target_shape.TextFrame.HasText:
-                text_length = len(target_shape.TextFrame.TextRange.Text)
-                start_pos = max(1, min(start_char, text_length))
-                end_pos = max(start_pos, min(end_char, text_length))
-                text_range = target_shape.TextFrame.TextRange.Characters(start_pos, end_pos - start_pos + 1)
-                range_desc = f"characters {start_pos}-{end_pos}"
-            else:
-                return f"Cannot format character range - textbox has no text"
-        else:
-            # Format entire text
+        # Handle regex-based text replacement
+        if regex_finder:
+            if not target_shape.TextFrame.HasText:
+                return f"Cannot use regex on empty textbox {id}"
+            
+            current_text = target_shape.TextFrame.TextRange.Text
+            
+            # Parse regex flags
+            flags = 0
+            if "IGNORECASE" in regex_flags.upper():
+                flags |= re.IGNORECASE
+            if "MULTILINE" in regex_flags.upper():
+                flags |= re.MULTILINE
+            if "DOTALL" in regex_flags.upper():
+                flags |= re.DOTALL
+            
+            try:
+                # Find all matches in the original text
+                matches = list(re.finditer(regex_finder, current_text, flags))
+                
+                if matches:
+                    if replacement_text is not None:
+                        # Check if replacement contains markdown
+                        if any(marker in replacement_text for marker in ['**', '*', '~~', '[u]', '{color:', '{bg:']):
+                            # Process markdown in replacement text to get clean text and formatting
+                            processed_replacement, _ = process_markdown_lists(replacement_text)
+                            plain_replacement, format_segments = parse_markdown_text(processed_replacement)
+                            
+                            # Replace text in reverse order to maintain position indices
+                            new_text = current_text
+                            replacement_positions = []  # Track where replacements will be
+                            
+                            # Process matches in reverse order to maintain indices
+                            for match in reversed(matches):
+                                match_start = match.start()
+                                match_end = match.end()
+                                
+                                # Record where this replacement will be in the final text
+                                replacement_positions.insert(0, {
+                                    'start': match_start,
+                                    'length': len(plain_replacement),
+                                    'segments': format_segments
+                                })
+                                
+                                # Replace this match with plain replacement
+                                new_text = new_text[:match_start] + plain_replacement + new_text[match_end:]
+                            
+                            # Set the new text
+                            target_shape.TextFrame.TextRange.Text = new_text
+                            
+                            # Apply formatting to each replacement position
+                            for pos_info in replacement_positions:
+                                replacement_start = pos_info['start']
+                                replacement_length = pos_info['length']
+                                
+                                # Apply formatting from segments at this position
+                                for segment in pos_info['segments']:
+                                    try:
+                                        # Calculate absolute position in the text
+                                        # segment['start'] is 1-based and relative to replacement start
+                                        absolute_start = replacement_start + segment['start']
+                                        segment_length = segment['length']
+                                        
+                                        if segment_length > 0 and absolute_start <= len(new_text):
+                                            # Ensure we don't go beyond text bounds
+                                            if absolute_start + segment_length - 1 > len(new_text):
+                                                segment_length = len(new_text) - absolute_start + 1
+                                            
+                                            if segment_length > 0:
+                                                char_range = target_shape.TextFrame.TextRange.Characters(absolute_start, segment_length)
+                                                
+                                                # Apply the specific formatting from this segment
+                                                formatting = segment['formatting']
+                                                if formatting.get('bold'):
+                                                    char_range.Font.Bold = -1
+                                                if formatting.get('italic'):
+                                                    char_range.Font.Italic = -1
+                                                if formatting.get('underline'):
+                                                    char_range.Font.Underline = -1
+                                                if formatting.get('strikethrough'):
+                                                    try:
+                                                        char_range.Font.Strike = -1
+                                                    except:
+                                                        pass
+                                                if formatting.get('color'):
+                                                    try:
+                                                        color_value = formatting['color']
+                                                        if color_value.startswith('#'):
+                                                            hex_color = color_value[1:]
+                                                            if len(hex_color) == 6:
+                                                                r = int(hex_color[0:2], 16)
+                                                                g = int(hex_color[2:4], 16) 
+                                                                b = int(hex_color[4:6], 16)
+                                                                bgr_color = b + (g * 256) + (r * 65536)
+                                                                char_range.Font.Color.RGB = bgr_color
+                                                        else:
+                                                            color_map = {
+                                                                'red': 255, 'blue': 16711680, 'green': 65280,
+                                                                'yellow': 65535, 'orange': 33023, 'purple': 8388736,
+                                                                'black': 0, 'white': 16777215
+                                                            }
+                                                            if color_value.lower() in color_map:
+                                                                char_range.Font.Color.RGB = color_map[color_value.lower()]
+                                                    except Exception as e:
+                                                        print(f"Warning: Could not apply color {color_value}: {e}")
+                                                        
+                                    except Exception as e:
+                                        print(f"Warning: Could not format segment at position {replacement_start}: {e}")
+                        else:
+                            # Simple text replacement without markdown
+                            new_text = re.sub(regex_finder, replacement_text, current_text, flags=flags)
+                            target_shape.TextFrame.TextRange.Text = new_text
+                        
+                        updates_made.append(f"replaced {len(matches)} regex matches with '{replacement_text}'")
+                else:
+                    updates_made.append(f"no matches found for regex pattern '{regex_finder}'")
+                    
+            except re.error as e:
+                return f"Invalid regex pattern '{regex_finder}': {str(e)}"
+        
+        # Apply global font settings that don't conflict with markdown
+        if target_shape.TextFrame.HasText:
             text_range = target_shape.TextFrame.TextRange
-            range_desc = "entire text"
-        
-        # Apply font formatting
-        if font_size is not None:
-            text_range.Font.Size = font_size
-            updates_made.append(f"set font size to {font_size} for {range_desc}")
-        
-        if font_name is not None:
-            text_range.Font.Name = font_name
-            updates_made.append(f"set font to '{font_name}' for {range_desc}")
-        
-        if font_bold is not None:
-            text_range.Font.Bold = -1 if font_bold else 0
-            updates_made.append(f"set bold to {font_bold} for {range_desc}")
-        
-        if font_italic is not None:
-            text_range.Font.Italic = -1 if font_italic else 0
-            updates_made.append(f"set italic to {font_italic} for {range_desc}")
-        
-        if font_underline is not None:
-            text_range.Font.Underline = -1 if font_underline else 0
-            updates_made.append(f"set underline to {font_underline} for {range_desc}")
-        
-        # Note: Strikethrough might not be available in all PowerPoint versions
-        try:
-            if font_strikethrough is not None:
-                text_range.Font.Strike = -1 if font_strikethrough else 0
-                updates_made.append(f"set strikethrough to {font_strikethrough} for {range_desc}")
-        except:
-            if font_strikethrough is not None:
-                updates_made.append("strikethrough not supported in this PowerPoint version")
-        
-        # Handle colors (convert hex to RGB)
-        def hex_to_rgb(hex_color):
-            """Convert hex color to RGB integer for PowerPoint"""
-            if hex_color.startswith('#'):
-                hex_color = hex_color[1:]
-            return int(hex_color[4:6] + hex_color[2:4] + hex_color[0:2], 16)
-        
-        if font_color is not None:
-            try:
-                rgb_color = hex_to_rgb(font_color)
-                text_range.Font.Color.RGB = rgb_color
-                updates_made.append(f"set font color to {font_color} for {range_desc}")
-            except:
-                updates_made.append(f"invalid font color format: {font_color}")
-        
-        if background_color is not None:
-            try:
-                rgb_color = hex_to_rgb(background_color)
-                text_range.Font.Fill.ForeColor.RGB = rgb_color
-                updates_made.append(f"set background color to {background_color} for {range_desc}")
-            except:
-                updates_made.append(f"invalid background color format: {background_color}")
-        
-        # Apply paragraph formatting (only to entire text, not character ranges)
-        if start_char is None and end_char is None:
+            
+            if font_name:
+                text_range.Font.Name = font_name
+                updates_made.append(f"set font to '{font_name}' for entire text")
+            
+            # Apply paragraph formatting (these don't conflict with markdown)
             if text_align is not None:
                 alignment_map = {
                     "left": 1,
@@ -251,31 +564,22 @@ def update_textbox_tool(id: int, text: str = None, text_operation: str = "replac
                 text_range.ParagraphFormat.SpaceWithin = line_spacing
                 updates_made.append(f"set line spacing to {line_spacing}")
         
-        # Apply character spacing
-        if char_spacing is not None:
-            try:
-                text_range.Font.Spacing = char_spacing
-                updates_made.append(f"set character spacing to {char_spacing} for {range_desc}")
-            except:
-                updates_made.append("character spacing not supported in this PowerPoint version")
-        
         # Apply text margins (only to entire textbox)
-        if start_char is None and end_char is None:
-            if left_margin is not None:
-                target_shape.TextFrame.MarginLeft = left_margin
-                updates_made.append(f"set left margin to {left_margin}")
-            
-            if right_margin is not None:
-                target_shape.TextFrame.MarginRight = right_margin
-                updates_made.append(f"set right margin to {right_margin}")
-            
-            if top_margin is not None:
-                target_shape.TextFrame.MarginTop = top_margin
-                updates_made.append(f"set top margin to {top_margin}")
-            
-            if bottom_margin is not None:
-                target_shape.TextFrame.MarginBottom = bottom_margin
-                updates_made.append(f"set bottom margin to {bottom_margin}")
+        if left_margin is not None:
+            target_shape.TextFrame.MarginLeft = left_margin
+            updates_made.append(f"set left margin to {left_margin}")
+        
+        if right_margin is not None:
+            target_shape.TextFrame.MarginRight = right_margin
+            updates_made.append(f"set right margin to {right_margin}")
+        
+        if top_margin is not None:
+            target_shape.TextFrame.MarginTop = top_margin
+            updates_made.append(f"set top margin to {top_margin}")
+        
+        if bottom_margin is not None:
+            target_shape.TextFrame.MarginBottom = bottom_margin
+            updates_made.append(f"set bottom margin to {bottom_margin}")
         
         # Clear slide context cache to ensure fresh context on next request
         try:
@@ -295,189 +599,382 @@ def update_textbox_tool(id: int, text: str = None, text_operation: str = "replac
         return f"Error updating textbox {id}: {str(e)}"
 
 # Universal object manipulation tools
+
 @tool
 def move_object(id: int, left: int, top: int) -> str:
     """
-    Move any object by ID to new coordinates.
-
+    Move any object (textbox, shape, image, etc.) to new coordinates on the slide.
+    
+    The slide coordinate system:
+    - Origin (0, 0) is at the top-left corner
+    - Standard slide is 960 points wide × 540 points tall
+    - Measurements are in points (72 points = 1 inch)
+    
     Args:
-        id (int): The ID of the object to move.
-        left (int): New left position in points.
-        top (int): New top position in points.
-
+        id: The ID of the object to move
+        left: Distance from left edge of slide in points (0-960 for standard slide)
+        top: Distance from top edge of slide in points (0-540 for standard slide)
+    
     Returns:
-        str: Confirmation message of the move operation.
+        str: Confirmation message with the object's new position
     """
-    import win32com.client, pythoncom
     pythoncom.CoInitialize()
-    ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
-    presentation = ppt_app.ActivePresentation
-    for slide in presentation.Slides:
-        for shape in slide.Shapes:
-            if shape.Id == id:
-                shape.Left = left
-                shape.Top = top
-                return f"Moved object {id} to ({left}, {top}) on slide {slide.SlideIndex}"
-    return f"Shape with id {id} not found"
+    try:
+        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+        presentation = ppt_app.ActivePresentation
+        for slide in presentation.Slides:
+            for shape in slide.Shapes:
+                if shape.Id == id:
+                    shape.Left = left
+                    shape.Top = top
+                    return f"Moved object {id} to position ({left}, {top}) on slide {slide.SlideIndex}"
+        return f"Object with ID {id} not found"
+    except Exception as e:
+        return f"Error moving object {id}: {str(e)}"
 
 @tool
 def resize_object(id: int, width: int, height: int) -> str:
     """
-    Resize any object by ID to new dimensions.
-
+    Change the size of any object (textbox, shape, image, etc.) to new dimensions.
+    
     Args:
-        id (int): The ID of the object to resize.
-        width (int): New width in points.
-        height (int): New height in points.
-
+        id: The ID of the object to resize
+        width: New width in points
+        height: New height in points
+    
     Returns:
-        str: Confirmation message of the resize operation.
+        str: Confirmation message with the object's new dimensions
     """
-    import win32com.client, pythoncom
     pythoncom.CoInitialize()
-    ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
-    presentation = ppt_app.ActivePresentation
-    for slide in presentation.Slides:
-        for shape in slide.Shapes:
-            if shape.Id == id:
-                shape.Width = width
-                shape.Height = height
-                return f"Resized object {id} to ({width}x{height}) on slide {slide.SlideIndex}"
-    return f"Shape with id {id} not found"
+    try:
+        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+        presentation = ppt_app.ActivePresentation
+        for slide in presentation.Slides:
+            for shape in slide.Shapes:
+                if shape.Id == id:
+                    shape.Width = width
+                    shape.Height = height
+                    return f"Resized object {id} to {width}×{height} points on slide {slide.SlideIndex}"
+        return f"Object with ID {id} not found"
+    except Exception as e:
+        return f"Error resizing object {id}: {str(e)}"
+
+@tool
+def position_and_resize_object(id: int, left: int, top: int, width: int, height: int) -> str:
+    """
+    Move and resize an object in a single operation for precise positioning.
+    
+    Useful when you need to set both position and size to avoid multiple operations.
+    
+    Args:
+        id: The ID of the object to position and resize
+        left: Distance from left edge of slide in points
+        top: Distance from top edge of slide in points
+        width: New width in points
+        height: New height in points
+    
+    Returns:
+        str: Confirmation message with the object's new position and size
+    """
+    pythoncom.CoInitialize()
+    try:
+        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+        presentation = ppt_app.ActivePresentation
+        for slide in presentation.Slides:
+            for shape in slide.Shapes:
+                if shape.Id == id:
+                    shape.Left = left
+                    shape.Top = top
+                    shape.Width = width
+                    shape.Height = height
+                    return f"Positioned object {id} at ({left}, {top}) with size {width}×{height} on slide {slide.SlideIndex}"
+        return f"Object with ID {id} not found"
+    except Exception as e:
+        return f"Error positioning object {id}: {str(e)}"
 
 
 @tool
 def get_object_properties(id: int) -> dict:
     """
-    Return properties of an object by ID. This is used to get the properties of an object to know what to do with it. This is 
+    Get detailed information about any object on the slide.
+    
+    Returns comprehensive details including position, size, type, and content information.
+    Use this to inspect objects before modifying them.
 
     Args:
-        id (int): The ID of the object to inspect.
+        id: The ID of the object to inspect
 
     Returns:
-        dict: A dictionary of object properties or error message.
+        dict: Object properties including slide, position, size, type, and content details
     """
-    import win32com.client, pythoncom
     pythoncom.CoInitialize()
-    ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
-    presentation = ppt_app.ActivePresentation
-    for slide in presentation.Slides:
-        for shape in slide.Shapes:
-            if shape.Id == id:
-                props = {
-                    "slide": slide.SlideIndex,
-                    "id": shape.Id,
-                    "name": shape.Name,
-                    "left": shape.Left,
-                    "top": shape.Top,
-                    "width": shape.Width,
-                    "height": shape.Height,
-                    "rotation": shape.Rotation,
-                    "type": shape.Type
-                }
-                return props
-    return {"error": f"Shape with id {id} not found"}
+    try:
+        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+        presentation = ppt_app.ActivePresentation
+        for slide in presentation.Slides:
+            for shape in slide.Shapes:
+                if shape.Id == id:
+                    props = {
+                        "slide": slide.SlideIndex,
+                        "id": shape.Id,
+                        "name": shape.Name,
+                        "left": shape.Left,
+                        "top": shape.Top,
+                        "width": shape.Width,
+                        "height": shape.Height,
+                        "rotation": shape.Rotation,
+                        "type": shape.Type,
+                        "type_name": _get_shape_type_name(shape.Type)
+                    }
+                    
+                    # Add text content if it's a text-containing shape
+                    if hasattr(shape, 'TextFrame') and shape.TextFrame.HasText:
+                        props["text_content"] = shape.TextFrame.TextRange.Text[:100] + "..." if len(shape.TextFrame.TextRange.Text) > 100 else shape.TextFrame.TextRange.Text
+                    
+                    return props
+        return {"error": f"Object with ID {id} not found"}
+    except Exception as e:
+        return {"error": f"Error inspecting object {id}: {str(e)}"}
+
+def _get_shape_type_name(shape_type: int) -> str:
+    """Convert PowerPoint shape type number to readable name."""
+    type_map = {
+        1: "AutoShape",
+        5: "Freeform", 
+        9: "Group",
+        11: "Picture",
+        12: "OLEObject",
+        13: "Chart",
+        14: "Table",
+        15: "Media",
+        17: "TextBox",
+        18: "Content",
+        19: "SmartArt"
+    }
+    return type_map.get(shape_type, f"Unknown({shape_type})")
 
 @tool
-def duplicate_object(id: int, target_slide_idx: int = None) -> int:
+def copy_object_to_slide(id: int, target_slide_idx: int, new_left: int = None, new_top: int = None) -> int:
     """
-    Duplicate object by ID, optionally to another slide.
-
+    Copy an object to another slide, optionally positioning it at specific coordinates.
+    
+    The original object remains unchanged. A new copy is created on the target slide.
+    
     Args:
-        id (int): The ID of the object to duplicate.
-        target_slide_idx (int, optional): Slide index to duplicate onto. Defaults to same slide.
-
+        id: The ID of the object to copy
+        target_slide_idx: Slide number to copy the object to (1-indexed)
+        new_left: Optional new left position for the copy (preserves original position if not specified)
+        new_top: Optional new top position for the copy (preserves original position if not specified)
+    
     Returns:
-        int: The new object's ID, or -1 if failed.
+        int: The ID of the newly created copy, or -1 if operation failed
     """
-    import win32com.client, pythoncom
     pythoncom.CoInitialize()
-    ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
-    presentation = ppt_app.ActivePresentation
-    source_shape = None
-    for slide in presentation.Slides:
-        for shape in slide.Shapes:
-            if shape.Id == id:
-                source_slide = slide
-                source_shape = shape
+    try:
+        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+        presentation = ppt_app.ActivePresentation
+        
+        # Find source object
+        source_shape = None
+        for slide in presentation.Slides:
+            for shape in slide.Shapes:
+                if shape.Id == id:
+                    source_shape = shape
+                    break
+            if source_shape:
                 break
-        if source_shape:
-            break
-    if not source_shape:
+        
+        if not source_shape:
+            return -1
+        
+        # Create target slide if needed
+        if presentation.Slides.Count < target_slide_idx:
+            target_slide = presentation.Slides.Add(target_slide_idx, 12)  # 12 = ppLayoutBlank
+        else:
+            target_slide = presentation.Slides(target_slide_idx)
+        
+        # Copy and paste
+        source_shape.Copy()
+        pasted = target_slide.Shapes.Paste()
+        
+        if pasted and pasted.Count > 0:
+            new_shape = pasted[0]
+            new_id = new_shape.Id
+            
+            # Position the copy if coordinates specified
+            if new_left is not None:
+                new_shape.Left = new_left
+            if new_top is not None:
+                new_shape.Top = new_top
+            
+            return new_id
+        else:
+            return -1
+            
+    except Exception as e:
+        print(f"Error copying object {id}: {str(e)}")
         return -1
-    # Duplicate on same slide if no target specified or same slide
-    if not target_slide_idx or source_slide.SlideIndex == target_slide_idx:
+
+@tool
+def duplicate_object_on_same_slide(id: int, offset_left: int = 20, offset_top: int = 20) -> int:
+    """
+    Create a duplicate of an object on the same slide with a slight position offset.
+    
+    Useful for creating multiple similar objects quickly.
+    
+    Args:
+        id: The ID of the object to duplicate
+        offset_left: How many points to move the duplicate to the right (default: 20)
+        offset_top: How many points to move the duplicate down (default: 20)
+    
+    Returns:
+        int: The ID of the newly created duplicate, or -1 if operation failed
+    """
+    pythoncom.CoInitialize()
+    try:
+        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+        presentation = ppt_app.ActivePresentation
+        
+        # Find source object
+        source_shape = None
+        for slide in presentation.Slides:
+            for shape in slide.Shapes:
+                if shape.Id == id:
+                    source_shape = shape
+                    break
+            if source_shape:
+                break
+        
+        if not source_shape:
+            return -1
+        
+        # Duplicate on same slide
         dup = source_shape.Duplicate()
-        new_id = dup[0].Id if dup else -1
-        return new_id
-    # Copy/paste to target slide
-    source_shape.Copy()
-    if presentation.Slides.Count < target_slide_idx:
-        target_slide = presentation.Slides.Add(target_slide_idx, 12)
-    else:
-        target_slide = presentation.Slides(target_slide_idx)
-    pasted = target_slide.Shapes.Paste()
-    new_id = pasted[0].Id if pasted else -1
-    return new_id
+        if dup and dup.Count > 0:
+            new_shape = dup[0]
+            # Offset the position slightly
+            new_shape.Left = source_shape.Left + offset_left
+            new_shape.Top = source_shape.Top + offset_top
+            return new_shape.Id
+        else:
+            return -1
+            
+    except Exception as e:
+        print(f"Error duplicating object {id}: {str(e)}")
+        return -1
 
 @tool
 def delete_object(id: int) -> str:
     """
-    Delete object by ID.
-
+    Permanently delete an object from the slide.
+    
+    ⚠️ WARNING: This action cannot be undone programmatically.
+    
     Args:
-        id (int): The ID of the object to delete.
-
+        id: The ID of the object to delete
+    
     Returns:
-        str: Confirmation message of deletion.
+        str: Confirmation message of deletion
     """
-    import win32com.client, pythoncom
     pythoncom.CoInitialize()
-    ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
-    presentation = ppt_app.ActivePresentation
-    for slide in presentation.Slides:
-        for shape in slide.Shapes:
-            if shape.Id == id:
-                shape.Delete()
-                return f"Deleted object {id} on slide {slide.SlideIndex}"
-    return f"Shape with id {id} not found"
+    try:
+        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+        presentation = ppt_app.ActivePresentation
+        for slide in presentation.Slides:
+            for shape in slide.Shapes:
+                if shape.Id == id:
+                    shape_name = shape.Name
+                    slide_num = slide.SlideIndex
+                    shape.Delete()
+                    
+                    # Clear slide context cache after deletion
+                    try:
+                        reader = get_slide_reader()
+                        if reader:
+                            reader.clear_context_cache()
+                    except Exception:
+                        pass
+                    
+                    return f"Deleted object '{shape_name}' (ID: {id}) from slide {slide_num}"
+        return f"Object with ID {id} not found"
+    except Exception as e:
+        return f"Error deleting object {id}: {str(e)}"
 
 # The tool is automatically registered when using the @tool decorator
 
 instructions = """
-You are a highly capable AI assistant that writes Python code to automate Microsoft PowerPoint presentations using the tools provided to you.
+You are a highly capable AI assistant that automates Microsoft PowerPoint presentations using specialized tools.
 
-IMPORTANT: You will ALWAYS receive the current slide context before the user's request. This context contains detailed information about:
-- The currently selected slide number and layout
-- All objects/shapes present on the slide (textboxes, images, tables, charts, etc.)
-- Their positions, sizes, text content, and formatting
-- IDs for each object (these never change and allow reliable object reference)
-- Any animations or slide notes
+IMPORTANT: You will ALWAYS receive current slide context before user requests. This context contains:
+- Current slide number and layout
+- All objects/shapes with their positions, sizes, text content, and formatting
+- Object IDs (permanent identifiers for reliable reference)
+- Animations and slide notes
 
-USE THIS CONTEXT to make informed decisions about:
-- Where to position new elements (avoid overlapping existing content)
-- What font sizes and styles to use (match existing elements when appropriate)
-- How to complement or enhance the existing slide content
-- Whether modifications should be made to existing elements vs. adding new ones
+USE THIS CONTEXT to make informed decisions about positioning, styling, and content placement.
 
+📝 TEXT EDITING TOOLS - Choose the RIGHT tool for the task:
 
+- NOTE : NEVER USE ANY EMOTICONS OR EMOJIS.
 
-CODE FORMATTING REQUIREMENTS:
-- ALWAYS write code between <code>(.*?)</code> 
-- NEVER EVER use other code formatting.
+1. **replace_textbox_content(id, markdown_text)** 
+   - COMPLETELY REPLACES all text in a textbox
+   - Use when: User wants to change entire content
+   - Example: "Change the title to 'New Title'"
 
-General PowerPoint Concepts:
-- A PowerPoint presentation is a `.pptx` file containing one or more slides.
-- Each slide can contain placeholders, text boxes, shapes, images, charts, tables, and animations.
-- The slide coordinate system is in **points** (1 inch = 72 points).
-- Standard slide dimensions (default in PowerPoint):
-  - Width: 960 points (13.33 inches)
-  - Height: 540 points (7.5 inches)
-  - Origin (0, 0) is the top-left corner of the slide.
+2. **modify_text_in_textbox(id, find_pattern, replacement_text)**
+   - FINDS and REPLACES specific words/phrases only
+   - PRESERVES all other existing text
+   - Use when: User wants to modify specific words
+   - Example: "Make 'Company Name' bold" or "Change 'red' to 'blue'"
 
-Remember use tools and change the slides only if necessary. 
-If the user is asking something about a slide or any other information that does not require you to change the slide then please do not answer the users questions in a new textbox on a slide.
-For examle if the user asks what is on the slide then you should not answer the users questions in a new textbox on a slide.
+3. **add_text_to_textbox(id, markdown_text, position)**
+   - ADDS text to beginning ("start") or end ("end") of existing content
+   - Use when: User wants to append/prepend text
+   - Example: "Add 'Confidential' to the end"
+
+4. **format_textbox_style(id, font_size, font_name, text_align, etc.)**
+   - Changes visual formatting WITHOUT modifying text content
+   - Use when: User wants to change appearance only
+   - Example: "Make the text center-aligned" or "Change font to Arial"
+
+🎨 MARKDOWN FORMATTING SYNTAX:
+- **bold** or __bold__ - Bold text
+- *italic* or _italic_ - Italic text  
+- ~~strikethrough~~ - Strikethrough text
+- [u]underlined[/u] - Underlined text
+- {color:red}colored{/color} - Colored text (hex #FF0000 or color names)
+- {bg:yellow}highlighted{/bg} - Background color
+- # Header 1, ## Header 2, ### Header 3 - Headers (auto-sized)
+- - bullet or * bullet - Bullet points
+- 1. numbered item - Numbered lists
+
+📐 POSITIONING TOOLS:
+
+1. **move_object(id, left, top)** - Move object to new position
+2. **resize_object(id, width, height)** - Change object size  
+3. **position_and_resize_object(id, left, top, width, height)** - Move and resize in one operation
+
+📋 OBJECT MANAGEMENT:
+
+1. **get_object_properties(id)** - Inspect object details before modifying
+2. **copy_object_to_slide(id, target_slide, new_left, new_top)** - Copy to another slide
+3. **duplicate_object_on_same_slide(id, offset_left, offset_top)** - Duplicate with offset
+4. **delete_object(id)** - Permanently remove object
+
+📏 SLIDE COORDINATE SYSTEM:
+- Origin (0,0) = top-left corner
+- Standard slide: 960 points wide × 540 points tall  
+- Measurements in points (72 points = 1 inch)
+
+⚠️ CRITICAL RULES:
+- ALWAYS use object IDs from slide context for reliable reference
+- Choose the most specific tool for each task
+- Consider existing content positioning when adding new elements
+- Use get_object_properties() to inspect before major modifications
+- Match existing fonts/styles when appropriate for consistency
+
+Remember: Only modify slides when the user specifically requests changes. For informational questions about slide content, respond without using tools.
 """
 
 # Create a custom logging handler to capture code generation
@@ -549,12 +1046,17 @@ def clear_slide_context_cache():
 
 agent = CodeAgent(
     tools=[
-        add_textbox_tool,
-        update_textbox_tool,
+        add_textbox,
+        replace_textbox_content,
+        modify_text_in_textbox,
+        add_text_to_textbox,
+        format_textbox_style,
         move_object,
         resize_object,
+        position_and_resize_object,
         get_object_properties,
-        duplicate_object,
+        copy_object_to_slide,
+        duplicate_object_on_same_slide,
         delete_object
     ],
     instructions=instructions,
@@ -758,66 +1260,4 @@ def run_agent_with_slide_context(message):
     """
     return run_agent_with_code_capture(message)
 
-def test_integration():
-    """Test the slide context integration with textbox creation."""
-    print("🧪 Testing PPT Agent with Auto-Refreshing Context")
-    print("=" * 60)
-    
-    # Test 1: Check slide reader connection
-    print("\n📡 Test 1: Checking PowerPoint connection...")
-    reader = get_slide_reader()
-    if reader and reader.ppt_app:
-        print("✅ PowerPoint connected successfully!")
-        
-        # Show current slide context
-        print("\n📄 Current slide context (initial):")
-        context = get_current_slide_context()
-        print(context[:400] + "..." if len(context) > 400 else context)
-        
-    else:
-        print("❌ PowerPoint not connected. Please open PowerPoint with a presentation.")
-        return
-    
-    # Test 2: Add a textbox
-    print("\n🤖 Test 2: Adding a textbox with slide context...")
-    add_message = "Add a textbox with 'Context Auto-Refresh Test' that doesn't overlap existing content"
-    
-    result = run_agent_with_slide_context(add_message)
-    print(f"\n📝 Add Result: {result['answer']}")
-    
-    # Test 3: Show that context was automatically refreshed
-    print("\n📄 Test 3: Context after addition (should show new object)...")
-    fresh_context = get_fresh_slide_context()
-    print(fresh_context[:600] + "..." if len(fresh_context) > 600 else fresh_context)
-    
-    # Test 4: Demonstrate automatic refresh works in subsequent requests
-    print("\n🤖 Test 4: Making another request to show agent sees new objects...")
-    list_message = "Tell me what objects are currently on this slide"
-    
-    list_result = run_agent_with_slide_context(list_message)
-    print(f"\n📝 List Result: {list_result['answer']}")
-    
-    # Test 5: Add another textbox to verify positioning awareness
-    print("\n🤖 Test 5: Adding another textbox to test positioning awareness...")
-    add_message2 = "Add another textbox with 'Second Textbox' that doesn't overlap with existing content"
-    
-    result2 = run_agent_with_slide_context(add_message2)
-    print(f"\n📝 Second Add Result: {result2['answer']}")
-    
-    # Test 6: Show final context
-    print("\n📄 Test 6: Final context after all additions...")
-    final_context = get_fresh_slide_context()
-    print(final_context[:500] + "..." if len(final_context) > 500 else final_context)
-    
-    print(f"\n💻 Tools available: add_textbox_tool")
-    print(f"\n📄 Auto-Refresh: ✅ Working - Context updates after every operation")
-    print(f"\n🔄 Cache Management: ✅ Working - Tools clear cache automatically")
-    
-    print("\n✅ Integration test completed!")
 
-if __name__ == "__main__":
-    # Test the integration
-    test_integration()
-    
-    # Original example (still works)
-    # print(agent.run("Add a textbox with text 'Hello' on slide 2, font size 32, bold."))

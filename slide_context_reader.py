@@ -325,7 +325,13 @@ Last Updated: {slide_info['timestamp']}
                 context += f"ID: {shape['static_id']}\n"
                 
                 if 'text' in shape:
-                    context += f"Text: {shape['text'][:100]}{'...' if len(shape['text']) > 100 else ''}\n"
+                    context += f"Text: {shape['text']}\n"
+                    
+                    # Show full text content for better AI context when modifying text
+                    full_text = shape['text']
+                    if len(full_text) > 100:
+                        context += f"Full Text (for editing): {full_text}\n"
+                    
                     if 'font_name' in shape:
                         context += f"Font: {shape['font_name']}, Size: {shape.get('font_size', 'N/A')}\n"
                         if shape.get('font_bold') or shape.get('font_italic'):
@@ -340,7 +346,7 @@ Last Updated: {slide_info['timestamp']}
                         context += "Table content:\n"
                         for row_idx, row_data in enumerate(shape['table_cells']):
                             # Format each row nicely
-                            row_str = " | ".join([f"{cell[:30]}{'...' if len(cell) > 30 else ''}" for cell in row_data])
+                            row_str = " | ".join(row_data)
                             context += f"  Row {row_idx + 1}: {row_str}\n"
                 
                 if 'chart_type' in shape:
