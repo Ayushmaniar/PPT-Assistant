@@ -194,6 +194,26 @@ class PowerPointSlideReader:
                 'error': str(e)
             }
     
+    def analyze_shape_lean(self, shape):
+        """Analyze a single shape and extract only essential properties for visualization."""
+        try:
+            shape_info = {
+                'left': shape.Left,
+                'top': shape.Top,
+                'width': shape.Width,
+                'height': shape.Height,
+                'static_id': shape.ID,
+                'z_order': shape.ZOrderPosition,
+                'has_text': shape.TextFrame.HasText if hasattr(shape, 'TextFrame') else False,
+            }
+            return shape_info
+        except Exception as e:
+            return {
+                'name': f"Shape analysis error: {e}",
+                'type': 'Unknown',
+                'error': str(e)
+            }
+    
     def get_layout_name_safe(self, slide):
         """Safely get layout name with error handling."""
         try:
@@ -394,6 +414,34 @@ class PowerPointSlideReader:
             }
         except:
             return "Could not read color"
+    
+    def read_slide_content_lean(self, slide_index):
+        """Read only essential content from a specific slide for visualization."""
+        try:
+            if not self.presentation:
+                return "No active presentation"
+            
+            if slide_index > self.presentation.Slides.Count:
+                return f"Slide {slide_index} does not exist (total slides: {self.presentation.Slides.Count})"
+            
+            slide = self.presentation.Slides(slide_index)
+            
+            slide_info = {
+                'slide_index': slide_index,
+                'total_shapes': slide.Shapes.Count,
+                'shapes': []
+            }
+            
+            # Analyze each shape in the slide using the lean analyzer
+            for i in range(1, slide.Shapes.Count + 1):
+                shape = slide.Shapes(i)
+                shape_info = self.analyze_shape_lean(shape)
+                slide_info['shapes'].append(shape_info)
+            
+            return slide_info
+            
+        except Exception as e:
+            return f"Error reading slide {slide_index} lean: {e}"
     
     def read_slide_content(self, slide_index):
         """Read all content from a specific slide."""
