@@ -8,14 +8,8 @@ import io
 import sys
 import win32com.client
 import pythoncom
-# Import the optimized lightning-fast implementation
-try:
-    from lightning_slide_context_reader import LightningFastPowerPointSlideReader as PowerPointSlideReader
-    print("✅ Using Lightning-Fast PowerPoint Slide Context Reader (24% faster)")
-except ImportError:
-    # Fallback to original implementation if lightning-fast is not available
-    from slide_context_reader import PowerPointSlideReader
-    print("⚠️ Using original PowerPoint Slide Context Reader (lightning-fast version not found)")
+
+from lightning_slide_context_reader import LightningFastPowerPointSlideReader as PowerPointSlideReader
 
 # Load environment variables from .env file
 load_dotenv()
@@ -27,7 +21,7 @@ if not openai_api_key:
 
 # Define the model using OpenAIServerModel
 model = OpenAIServerModel(
-    model_id="gpt-4.1-nano",
+    model_id="gpt-4.1",
     api_key=openai_api_key,
     api_base = "https://api.openai.com/v1"
 )
@@ -37,7 +31,7 @@ from html_processor import parse_html_text, process_html_lists, apply_html_forma
 
 # Tool to add a textbox to a PowerPoint slide
 @tool
-def add_textbox(slide_idx: int = 1, markdown_text: str = "<b>Sample Text</b>", left: int = 100, top: int = 100, width: int = 400, height: int = 50, font_size: int = None, font_name: str = None, text_align: str = "left") -> str:
+def add_textbox(slide_idx: int = 1, html_text: str = "<b>Sample Text</b>", left: int = 100, top: int = 100, width: int = 400, height: int = 50, font_size: int = None, font_name: str = None, text_align: str = "left") -> str:
     """
     Add a textbox to a PowerPoint slide with HTML-formatted text.
     HTML Syntax Supported:
@@ -53,7 +47,7 @@ def add_textbox(slide_idx: int = 1, markdown_text: str = "<b>Sample Text</b>", l
 
     Args:
         slide_idx: The slide number (1-indexed) to add the textbox to
-        markdown_text: The HTML-formatted text content for the textbox
+        html_text: The HTML-formatted text content for the textbox
         left: Left position of the textbox in points
         top: Top position of the textbox in points
         width: Width of the textbox in points
@@ -79,7 +73,7 @@ def add_textbox(slide_idx: int = 1, markdown_text: str = "<b>Sample Text</b>", l
         
         # Process HTML (always enabled now)
         # First process lists and headers
-        processed_text, list_info = process_html_lists(markdown_text)
+        processed_text, list_info = process_html_lists(html_text)
         
         # Then process inline formatting
         plain_text, format_segments = parse_html_text(processed_text)
@@ -147,7 +141,7 @@ def add_textbox(slide_idx: int = 1, markdown_text: str = "<b>Sample Text</b>", l
         return f"Error adding textbox: {str(e)}"
 
 @tool
-def replace_textbox_content(id: int, markdown_text: str, font_size: int = None, font_name: str = None, text_align: str = None) -> str:
+def replace_textbox_content(id: int, html_text: str, font_size: int = None, font_name: str = None, text_align: str = None) -> str:
     """
     COMPLETELY REPLACE all text content in a textbox with new HTML-formatted text.
     
@@ -167,7 +161,7 @@ def replace_textbox_content(id: int, markdown_text: str, font_size: int = None, 
     
     Args:
         id: The ID of the textbox to update
-        markdown_text: New HTML-formatted text content (replaces ALL existing text)
+        html_text: New HTML-formatted text content (replaces ALL existing text)
         font_size: Base font size in points (headers will be larger)
         font_name: Font name for the text
         text_align: Text alignment - "left", "center", "right", or "justify"
@@ -177,7 +171,7 @@ def replace_textbox_content(id: int, markdown_text: str, font_size: int = None, 
     """
     return _update_textbox_internal(
         id=id,
-        markdown_text=markdown_text,
+        html_text=html_text,
         text_operation="replace",
         font_size=font_size,
         font_name=font_name,
@@ -211,7 +205,7 @@ def modify_text_in_textbox(id: int, find_pattern: str, replacement_text: str, re
     )
 
 @tool
-def add_text_to_textbox(id: int, markdown_text: str, position: str = "end") -> str:
+def add_text_to_textbox(id: int, html_text: str, position: str = "end") -> str:
     """
     Add new text to the beginning or end of existing textbox content.
     
@@ -219,7 +213,7 @@ def add_text_to_textbox(id: int, markdown_text: str, position: str = "end") -> s
     
     Args:
         id: The ID of the textbox to modify
-        markdown_text: HTML-formatted text to add
+        html_text: HTML-formatted text to add
         position: Where to add the text - "start" (beginning) or "end" (default)
     
     Returns:
@@ -228,7 +222,7 @@ def add_text_to_textbox(id: int, markdown_text: str, position: str = "end") -> s
     operation = "prepend" if position == "start" else "append"
     return _update_textbox_internal(
         id=id,
-        markdown_text=markdown_text,
+        html_text=html_text,
         text_operation=operation
     )
 
@@ -267,16 +261,16 @@ def format_textbox_style(id: int, font_size: int = None, font_name: str = None, 
         bottom_margin=bottom_margin
     )
 
-def _update_textbox_internal(id: int, markdown_text: str = None, text_operation: str = "replace", regex_finder: str = None, replacement_text: str = None, regex_flags: str = "IGNORECASE", font_size: int = None, font_name: str = None, text_align: str = None, line_spacing: float = None, left_margin: float = None, right_margin: float = None, top_margin: float = None, bottom_margin: float = None) -> str:
+def _update_textbox_internal(id: int, html_text: str = None, text_operation: str = "replace", regex_finder: str = None, replacement_text: str = None, regex_flags: str = "IGNORECASE", font_size: int = None, font_name: str = None, text_align: str = None, line_spacing: float = None, left_margin: float = None, right_margin: float = None, top_margin: float = None, bottom_margin: float = None) -> str:
     """
     Internal implementation for textbox updates. Do not call directly.
     """
     pythoncom.CoInitialize()
     
     # INPUT VALIDATION: Prevent conflicting parameter combinations
-    if markdown_text is not None and text_operation == "replace" and regex_finder is not None:
-        return f"ERROR: Cannot use both 'markdown_text' with operation='replace' AND 'regex_finder'. Choose ONE approach:\n" \
-               f"- For complete text replacement: use 'markdown_text' parameter only\n" \
+    if html_text is not None and text_operation == "replace" and regex_finder is not None:
+        return f"ERROR: Cannot use both 'html_text' with operation='replace' AND 'regex_finder'. Choose ONE approach:\n" \
+               f"- For complete text replacement: use 'html_text' parameter only\n" \
                f"- For partial text replacement: use 'regex_finder' + 'replacement_text' only"
     
     if regex_finder and not replacement_text:
@@ -306,18 +300,18 @@ def _update_textbox_internal(id: int, markdown_text: str = None, text_operation:
         if not hasattr(target_shape, 'TextFrame'):
             return f"Shape with ID {id} is not a textbox or doesn't support text"
         
-        if not target_shape.TextFrame.HasText and not markdown_text:
+        if not target_shape.TextFrame.HasText and not html_text:
             return f"Shape with ID {id} has no text and no new text provided"
         
         updates_made = []
         
         # Handle text content updates
-        if markdown_text is not None:
+        if html_text is not None:
             current_text = target_shape.TextFrame.TextRange.Text if target_shape.TextFrame.HasText else ""
             
             if text_operation == "replace":
                 # Process HTML and apply formatting
-                processed_text, list_info = process_html_lists(markdown_text)
+                processed_text, list_info = process_html_lists(html_text)
                 plain_text, format_segments = parse_html_text(processed_text)
                 apply_html_formatting(target_shape.TextFrame.TextRange, plain_text, format_segments)
                 
@@ -352,7 +346,7 @@ def _update_textbox_internal(id: int, markdown_text: str = None, text_operation:
                     
             elif text_operation == "append":
                 # For append/prepend, we need to process the combined text to apply HTML formatting
-                combined_text = current_text + markdown_text
+                combined_text = current_text + html_text
                 
                 # Process the combined HTML text
                 processed_text, list_info = process_html_lists(combined_text)
@@ -386,11 +380,11 @@ def _update_textbox_internal(id: int, markdown_text: str = None, text_operation:
                         except Exception as e:
                             print(f"Warning: Could not apply header formatting: {e}")
                 
-                updates_made.append(f"appended HTML-formatted text: '{markdown_text[:30]}{'...' if len(markdown_text) > 30 else ''}'")
+                updates_made.append(f"appended HTML-formatted text: '{html_text[:30]}{'...' if len(html_text) > 30 else ''}'")
                 
             elif text_operation == "prepend":
                 # For prepend, we need to process the combined text to apply HTML formatting
-                combined_text = markdown_text + current_text
+                combined_text = html_text + current_text
                 
                 # Process the combined HTML text
                 processed_text, list_info = process_html_lists(combined_text)
@@ -424,7 +418,7 @@ def _update_textbox_internal(id: int, markdown_text: str = None, text_operation:
                         except Exception as e:
                             print(f"Warning: Could not apply header formatting: {e}")
                 
-                updates_made.append(f"prepended HTML-formatted text: '{markdown_text[:30]}{'...' if len(markdown_text) > 30 else ''}'")
+                updates_made.append(f"prepended HTML-formatted text: '{html_text[:30]}{'...' if len(html_text) > 30 else ''}'")
         
         # Handle regex-based text replacement
         if regex_finder:
@@ -448,53 +442,41 @@ def _update_textbox_internal(id: int, markdown_text: str = None, text_operation:
                 
                 if matches:
                     if replacement_text is not None:
-                        # Check if replacement contains markdown
+                        # Check if replacement contains HTML formatting
                         if any(marker in replacement_text for marker in ['<b>', '<i>', '<u>', '<s>', '<span', '<strong>', '<em>']):
                             # Process HTML in replacement text to get clean text and formatting
                             processed_replacement, _ = process_html_lists(replacement_text)
                             plain_replacement, format_segments = parse_html_text(processed_replacement)
                             
-                            # Replace text in reverse order to maintain position indices
-                            new_text = current_text
-                            replacement_positions = []  # Track where replacements will be
+                            # CRITICAL FIX: Instead of replacing all text at once, replace each match individually
+                            # This preserves existing formatting that was applied by previous calls
                             
-                            # Process matches in reverse order to maintain indices
+                            # Process matches in reverse order to maintain position indices
                             for match in reversed(matches):
                                 match_start = match.start()
                                 match_end = match.end()
+                                match_length = match_end - match_start
                                 
-                                # Record where this replacement will be in the final text
-                                replacement_positions.insert(0, {
-                                    'start': match_start,
-                                    'length': len(plain_replacement),
-                                    'segments': format_segments
-                                })
-                                
-                                # Replace this match with plain replacement
-                                new_text = new_text[:match_start] + plain_replacement + new_text[match_end:]
-                            
-                            # Set the new text
-                            target_shape.TextFrame.TextRange.Text = new_text
-                            
-                            # Apply formatting to each replacement position
-                            for pos_info in replacement_positions:
-                                replacement_start = pos_info['start']
-                                replacement_length = pos_info['length']
-                                
-                                # Apply formatting from segments at this position
-                                for segment in pos_info['segments']:
-                                    try:
-                                        # Calculate absolute position in the text
-                                        # segment['start'] is 1-based and relative to replacement start
-                                        absolute_start = replacement_start + segment['start']
-                                        segment_length = segment['length']
-                                        
-                                        if segment_length > 0 and absolute_start <= len(new_text):
-                                            # Ensure we don't go beyond text bounds
-                                            if absolute_start + segment_length - 1 > len(new_text):
-                                                segment_length = len(new_text) - absolute_start + 1
+                                # Replace this specific match in the textbox without affecting the rest
+                                if match_length > 0:
+                                    # Get the character range for this match (1-based indexing in PowerPoint)
+                                    match_range = target_shape.TextFrame.TextRange.Characters(match_start + 1, match_length)
+                                    
+                                    # Replace the text in this range only
+                                    match_range.Text = plain_replacement
+                                    
+                                    # Now apply formatting to the replacement text
+                                    replacement_start_pos = match_start + 1  # 1-based for PowerPoint
+                                    
+                                    for segment in format_segments:
+                                        try:
+                                            # Calculate absolute position within the replacement
+                                            # segment['start'] is 1-based relative to replacement start
+                                            absolute_start = replacement_start_pos + segment['start'] - 1
+                                            segment_length = segment['length']
                                             
                                             if segment_length > 0:
+                                                # Get the character range for this formatting segment
                                                 char_range = target_shape.TextFrame.TextRange.Characters(absolute_start, segment_length)
                                                 
                                                 # Apply the specific formatting from this segment
@@ -519,8 +501,8 @@ def _update_textbox_internal(id: int, markdown_text: str = None, text_operation:
                                                                 r = int(hex_color[0:2], 16)
                                                                 g = int(hex_color[2:4], 16) 
                                                                 b = int(hex_color[4:6], 16)
-                                                                bgr_color = b + (g * 256) + (r * 65536)
-                                                                char_range.Font.Color.RGB = bgr_color
+                                                                rgb_color = r + (g * 256) + (b * 65536)
+                                                                char_range.Font.Color.RGB = rgb_color
                                                         else:
                                                             color_map = {
                                                                 'red': 255, 'blue': 16711680, 'green': 65280,
@@ -532,10 +514,14 @@ def _update_textbox_internal(id: int, markdown_text: str = None, text_operation:
                                                     except Exception as e:
                                                         print(f"Warning: Could not apply color {color_value}: {e}")
                                                         
-                                    except Exception as e:
-                                        print(f"Warning: Could not format segment at position {replacement_start}: {e}")
+                                        except Exception as e:
+                                            print(f"Warning: Could not format segment at position {absolute_start}: {e}")
+                                            
+                                    # Update the current_text to reflect the change for subsequent matches
+                                    # This is needed because we're processing in reverse order
+                                    current_text = target_shape.TextFrame.TextRange.Text
                         else:
-                            # Simple text replacement without markdown
+                            # Simple text replacement without HTML formatting
                             new_text = re.sub(regex_finder, replacement_text, current_text, flags=flags)
                             target_shape.TextFrame.TextRange.Text = new_text
                         
@@ -918,13 +904,13 @@ IMPORTANT: You will ALWAYS receive current slide context before user requests. T
 - Object IDs (permanent identifiers for reliable reference)
 - Animations and slide notes
 
-USE THIS CONTEXT to make informed decisions about positioning, styling, and content placement.
+USE THIS CONTEXT in your THOUGHT process to make informed decisions about positioning, styling, and content placement.
 
 📝 TEXT EDITING TOOLS - Choose the RIGHT tool for the task:
 
 - NOTE : NEVER USE ANY EMOTICONS OR EMOJIS.
 
-1. **replace_textbox_content(id, markdown_text)** 
+1. **replace_textbox_content(id, html_text)** 
    - COMPLETELY REPLACES all text in a textbox
    - Use when: User wants to change entire content
    - Example: "Change the title to 'New Title'"
@@ -978,10 +964,18 @@ USE THIS CONTEXT to make informed decisions about positioning, styling, and cont
 - ALWAYS use object IDs from slide context for reliable reference
 - Choose the most specific tool for each task
 - Consider existing content positioning when adding new elements
-- Use get_object_properties() to inspect before major modifications
 - Match existing fonts/styles when appropriate for consistency
+- **ALWAYS end with final_answer() to report completion status and summary**
+- **LEVERAGE MULTI-TOOL ACTIONS**: Use multiple tools together when they accomplish related goals efficiently
 
-Remember: Only modify slides when the user specifically requests changes. For informational questions about slide content, respond without using tools.
+🏁 TASK COMPLETION:
+When you have successfully completed all requested tasks:
+1. Provide a final THOUGHT summarizing what was accomplished
+2. Use final_answer() tool to report the completion status
+3. Include a clear summary of what was changed/added/modified
+4. Example: final_answer("Successfully added title and formatted text. All requested changes have been completed.")
+
+Remember: Only modify slides when the user specifically requests changes. For informational questions about slide content, respond without using tools but still follow the THOUGHT→OBSERVATION pattern.
 """
 
 # Create a custom logging handler to capture code generation
