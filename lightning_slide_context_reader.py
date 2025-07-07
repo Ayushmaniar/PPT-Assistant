@@ -283,8 +283,21 @@ class LightningFastPowerPointSlideReader:
                     open_tags.append(f'<span style="color: {hex_color}">')
                     close_tags.insert(0, '</span>')
 
-                # Escape HTML special characters
-                escaped_text = run_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                # Convert line breaks to <br> tags FIRST (before HTML escaping to avoid conflicts)
+                escaped_text = run_text.replace('\r\n', '<br>').replace('\r', '<br>').replace('\n', '<br>')
+                
+                # Clean up other problematic whitespace characters that might cause display issues
+                escaped_text = escaped_text.replace('\x0b', '<br>')  # Vertical tab
+                escaped_text = escaped_text.replace('\x0c', '<br>')  # Form feed
+                escaped_text = escaped_text.replace('\xa0', ' ')     # Non-breaking space to regular space
+                escaped_text = escaped_text.replace('\u2028', '<br>')  # Line separator
+                escaped_text = escaped_text.replace('\u2029', '<br>')  # Paragraph separator
+                
+                # Then escape HTML special characters
+                escaped_text = escaped_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                
+                # But preserve our <br> tags by converting them back
+                escaped_text = escaped_text.replace('&lt;br&gt;', '<br>')
 
                 # Assemble the final HTML for this run
                 formatted_text = ''.join(open_tags) + escaped_text + ''.join(close_tags)

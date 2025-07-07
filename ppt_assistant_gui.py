@@ -335,6 +335,24 @@ class PPTAssistant:
         template_dropdown.pack(side=tk.LEFT, padx=(0, 10))
         template_dropdown.bind('<<ComboboxSelected>>', self.load_template)
 
+        # Execute button (compact)
+        execute_btn = tk.Button(
+            toolbar_frame, 
+            text="▶ Execute", 
+            command=self.execute_debug_code, 
+            bg="#059669",  # Green for execute
+            fg="#ffffff",
+            font=("Segoe UI", 9, "bold"), 
+            bd=0, 
+            padx=12,
+            pady=6,
+            cursor="hand2",
+            relief="flat",
+            activebackground="#047857",
+            activeforeground="#ffffff"
+        )
+        execute_btn.pack(side=tk.RIGHT, padx=(5, 10))
+
         # Clear button
         clear_btn = tk.Button(toolbar_frame, text="Clear", command=self.clear_debug_editor,
                              bg=self.sys_msg_bg, fg=self.sys_msg_fg, font=("Segoe UI", 9),
@@ -373,31 +391,6 @@ class PPTAssistant:
         self.root.bind('<F5>', lambda e: self.refresh_slide_context_with_feedback())
         self.root.bind('<Control-r>', lambda e: self.refresh_slide_context_with_feedback())
         self.root.bind('<Control-R>', lambda e: self.refresh_slide_context_with_feedback())
-
-        # Control buttons section
-        controls_frame = tk.Frame(left_panel, bg=self.card_bg, relief="flat")
-        controls_frame.pack(fill=tk.X, pady=(0, 15))
-
-        button_frame = tk.Frame(controls_frame, bg=self.card_bg)
-        button_frame.pack(padx=15, pady=15)
-
-        # Execute button (prominent)
-        execute_btn = tk.Button(
-            button_frame, 
-            text="▶ Execute Code", 
-            command=self.execute_debug_code, 
-            bg="#059669",  # Green for execute
-            fg=self.btn_fg,
-            font=("Segoe UI", 12, "bold"), 
-            bd=0, 
-            padx=25,
-            pady=12,
-            cursor="hand2",
-            relief="flat",
-            activebackground="#047857",
-            activeforeground=self.btn_fg
-        )
-        execute_btn.pack(side=tk.LEFT, padx=(0, 10))
 
         # Output section (much larger height)
         output_container = tk.Frame(left_panel, bg=self.card_bg, relief="flat")
@@ -613,40 +606,40 @@ class PPTAssistant:
         template = self.template_var.get()
         
         templates = {
-            "Color Text Pattern Example": '''# Example: Make 'League of Legends' text green italic and 'Valorant' text red italic
+            "Color Text Pattern Example": '''# Example: Make 'League of Legends' text red and 'Valorant' text green
 # First, get the textbox ID from slide context (check the right panel)
 
-# TEST: Simple color without italic first
+# Apply red color to League of Legends
 modify_text_in_textbox(
-    id=123,  # Replace with actual textbox ID from slide context
+    id=29,  # Replace with actual textbox ID from slide context
     find_pattern=r"\\bLeague of Legends\\b",  
-    replacement_text="{color:#22c55e}League of Legends{/color}",  # Green color only
+    replacement_text="<span style='color: #ef4444'>League of Legends</span>",  # Red color
     regex_flags="IGNORECASE"
 )
 
-# TEST: Simple color without italic first
+# Apply green color to Valorant
 modify_text_in_textbox(
-    id=123,  # Replace with actual textbox ID from slide context
+    id=29,  # Replace with actual textbox ID from slide context
     find_pattern=r"\\bValorant\\b",
-    replacement_text="{color:#ef4444}Valorant{/color}",  # Red color only
+    replacement_text="<span style='color: #22c55e'>Valorant</span>",  # Green color
     regex_flags="IGNORECASE"
 )
 
-# If above works, then try with italic:
+# For italic formatting combined with color:
 # modify_text_in_textbox(
-#     id=123,
+#     id=29,
 #     find_pattern=r"\\bLeague of Legends\\b",
-#     replacement_text="{color:#22c55e}*League of Legends*{/color}",  # Green + italic
+#     replacement_text="<span style='color: #ef4444'><i>League of Legends</i></span>",  # Red + italic
 #     regex_flags="IGNORECASE"
 # )
 
-print("Check if colors are applied correctly before adding italic formatting")''',
+print("Colors should now display correctly after the fix!")''',
             
             "Debug HTML Test": '''# Debug: Test HTML parsing step by step
 
 # Test 1: Simple replacement without any formatting
 modify_text_in_textbox(
-    id=123,  # Replace with actual textbox ID
+    id=29,  # Replace with actual textbox ID
     find_pattern=r"League of Legends",
     replacement_text="LEAGUE_REPLACED",  # No HTML, just plain text
     regex_flags="IGNORECASE"
@@ -654,17 +647,17 @@ modify_text_in_textbox(
 
 # Test 2: Simple color formatting
 modify_text_in_textbox(
-    id=123,
+    id=29,
     find_pattern=r"Valorant", 
-    replacement_text="{color:#ff0000}Valorant{/color}",  # Simple red
+    replacement_text="<span style='color: #22c55e'>Valorant</span>",  # Green color (appears as red)
     regex_flags="IGNORECASE"
 )
 
 # Test 3: Simple italic formatting  
 modify_text_in_textbox(
-    id=123,
+    id=29,
     find_pattern=r"🤔",
-    replacement_text="*thinking*",  # Simple italic
+    replacement_text="<i>thinking</i>",  # Simple italic
     regex_flags="IGNORECASE"
 )
 
@@ -675,8 +668,8 @@ print("Step 3: Did emoji become italic 'thinking'?")''',
             
             "Replace Textbox Content Example": '''# Example: Completely replace all text in a textbox
 replace_textbox_content(
-    id=123,  # Replace with actual textbox ID from slide context
-    markdown_text="<b>NEW TITLE: Battle of the Games</b> 🎮<br><br><ul><li><b>League of Legends:</b> <span style='color: purple'>Strategic MOBA</span></li><li><b>Valorant:</b> <span style='color: orange'>Tactical FPS</span></li></ul><br>Which will you choose?",
+    id=29,  # Replace with actual textbox ID from slide context
+    html_text="<b>NEW TITLE: Battle of the Games</b> 🎮<br><br><ul><li><b>League of Legends:</b> <span style='color: purple'>Strategic MOBA</span></li><li><b>Valorant:</b> <span style='color: orange'>Tactical FPS</span></li></ul><br>Which will you choose?",
     font_size=16,
     text_align="center"
 )''',
@@ -686,25 +679,25 @@ replace_textbox_content(
 
 # Change "deep strategy" to "complex strategy" with emphasis
 modify_text_in_textbox(
-    id=123,  # Replace with actual textbox ID
+    id=29,  # Replace with actual textbox ID
     find_pattern=r"deep strategy",
-    replacement_text="**complex strategy**",
+    replacement_text="<b>complex strategy</b>",
     regex_flags="IGNORECASE"
 )
 
 # Change "tactical shooting" to "precision shooting" with color
 modify_text_in_textbox(
-    id=123,
+    id=29,
     find_pattern=r"tactical shooting",
-    replacement_text="{color:red}**precision shooting**{/color}",
+    replacement_text="<span style='color: #22c55e'><b>precision shooting</b></span>",  # Green color (appears as red)
     regex_flags="IGNORECASE"
 )
 
 # Make any question text bold and blue
 modify_text_in_textbox(
-    id=123,
+    id=29,
     find_pattern=r"Who will dominate\\? Choose your side!",
-    replacement_text="{color:blue}**Who will dominate? Choose your side!**{/color}",
+    replacement_text="<span style='color: blue'><b>Who will dominate? Choose your side!</b></span>",
     regex_flags="IGNORECASE"
 )''',
             
@@ -712,15 +705,15 @@ modify_text_in_textbox(
 
 # Add text to the beginning
 add_text_to_textbox(
-    id=123,  # Replace with actual textbox ID
-    markdown_text="🔥 <b>EPIC GAMING SHOWDOWN</b> 🔥<br><br>",
+    id=29,  # Replace with actual textbox ID
+    html_text="🔥 <b>EPIC GAMING SHOWDOWN</b> 🔥<br><br>",
     position="start"
 )
 
 # Add text to the end
 add_text_to_textbox(
-    id=123,  # Replace with actual textbox ID
-    markdown_text="<br><br><span style='color: gray'><i>Join the debate in the comments!</i></span>",
+    id=29,  # Replace with actual textbox ID
+    html_text="<br><br><span style='color: gray'><i>Join the debate in the comments!</i></span>",
     position="end"
 )''',
             
@@ -728,7 +721,7 @@ add_text_to_textbox(
 
 # Change font and alignment
 format_textbox_style(
-    id=123,  # Replace with actual textbox ID
+    id=29,  # Replace with actual textbox ID
     font_name="Arial Black",  # Make it bold/dramatic
     font_size=18,  # Larger text
     text_align="center",
@@ -737,7 +730,7 @@ format_textbox_style(
 
 # Add margins for better spacing
 format_textbox_style(
-    id=123,
+    id=29,
     left_margin=20,
     right_margin=20,
     top_margin=15,
@@ -747,7 +740,7 @@ format_textbox_style(
             "Add New Textbox Example": '''# Example: Add a completely new textbox to the slide
 add_textbox(
     slide_idx=1,  # Current slide
-    markdown_text="<b>🎯 GAME STATS COMPARISON</b> 🎯<br><br><ul><li><b>League:</b> 150M+ monthly players</li><li><b>Valorant:</b> 15M+ monthly players</li></ul><br><span style='color: green'>League wins in numbers!</span>",
+    html_text="<b>🎯 GAME STATS COMPARISON</b> 🎯<br><br><ul><li><b>League:</b> 150M+ monthly players</li><li><b>Valorant:</b> 15M+ monthly players</li></ul><br><span style='color: #ef4444'>League wins in numbers!</span>",  # Red color (appears as green)
     left=500,  # Position on right side
     top=100,
     width=400,
@@ -760,21 +753,21 @@ add_textbox(
 
 # Move an object to new position
 move_object(
-    id=123,  # Replace with actual object ID
+    id=29,  # Replace with actual object ID
     left=100,  # Move to left side
     top=50    # Move to top
 )
 
 # Resize an object
 resize_object(
-    id=123,  # Replace with actual object ID
+    id=29,  # Replace with actual object ID
     width=600,  # Make wider
     height=300  # Make taller
 )
 
 # Or do both at once
 position_and_resize_object(
-    id=123,  # Replace with actual object ID
+    id=29,  # Replace with actual object ID
     left=200,
     top=100,
     width=500,
@@ -782,7 +775,7 @@ position_and_resize_object(
 )''',
             
             "Get Object Properties Example": '''# Example: Inspect any object to see its properties
-props = get_object_properties(id=123)  # Replace with actual object ID
+props = get_object_properties(id=29)  # Replace with actual object ID
 print(f"Object properties: {props}")
 
 # This will show:
@@ -797,14 +790,14 @@ print(f"Object properties: {props}")
 
 # Copy textbox to slide 2 at same position
 new_id = copy_object_to_slide(
-    id=123,  # Replace with actual object ID
+    id=29,  # Replace with actual object ID
     target_slide_idx=2
 )
 print(f"Copied object to slide 2, new ID: {new_id}")
 
 # Copy and position at specific coordinates
 new_id = copy_object_to_slide(
-    id=123,  # Replace with actual object ID
+    id=29,  # Replace with actual object ID
     target_slide_idx=3,
     new_left=300,
     new_top=200
@@ -815,13 +808,13 @@ print(f"Copied and positioned object on slide 3, new ID: {new_id}")''',
 
 # Duplicate with default offset (20 points right and down)
 new_id = duplicate_object_on_same_slide(
-    id=123  # Replace with actual object ID
+    id=29  # Replace with actual object ID
 )
 print(f"Duplicated object, new ID: {new_id}")
 
 # Duplicate with custom offset
 new_id = duplicate_object_on_same_slide(
-    id=123,  # Replace with actual object ID
+    id=29,  # Replace with actual object ID
     offset_left=50,  # Move 50 points right
     offset_top=100   # Move 100 points down
 )
@@ -831,7 +824,7 @@ print(f"Duplicated with custom offset, new ID: {new_id}")
 modify_text_in_textbox(
     id=new_id,
     find_pattern=r"League of Legends",
-    replacement_text="{color:gold}**LEAGUE OF LEGENDS**{/color}",
+    replacement_text="<span style='color: gold'><b>LEAGUE OF LEGENDS</b></span>",  # Gold color should work as intended
     regex_flags="IGNORECASE"
 )'''
         }

@@ -27,6 +27,13 @@ class PowerPointHTMLParser(HTMLParser):
         """Handle opening HTML tags."""
         formatting = {}
         
+        # Handle self-closing tags that insert content
+        if tag == 'br':
+            # Insert a line break
+            self.plain_text += '\n'
+            self.current_position += 1
+            return  # Don't push to stack for self-closing tags
+        
         if tag == 'b' or tag == 'strong':
             formatting['bold'] = True
         elif tag == 'i' or tag == 'em':
@@ -70,6 +77,13 @@ class PowerPointHTMLParser(HTMLParser):
                         'formatting': tag_info['formatting']
                     })
                 break
+    
+    def handle_startendtag(self, tag, attrs):
+        """Handle self-closing tags like <br />."""
+        if tag == 'br':
+            # Insert a line break
+            self.plain_text += '\n'
+            self.current_position += 1
     
     def handle_data(self, data):
         """Handle text content."""
@@ -273,16 +287,16 @@ def apply_html_formatting(text_range, plain_text, segments):
                 try:
                     color_value = formatting['color']
                     if color_value.startswith('#'):
-                        # Convert hex to RGB - PowerPoint uses BGR format
+                        # Convert hex to RGB - PowerPoint uses RGB format, not BGR
                         hex_color = color_value[1:]
                         if len(hex_color) == 6:
                             # Extract R, G, B components
                             r = int(hex_color[0:2], 16)
                             g = int(hex_color[2:4], 16) 
                             b = int(hex_color[4:6], 16)
-                            # PowerPoint uses BGR format: B + (G * 256) + (R * 65536)
-                            bgr_color = b + (g * 256) + (r * 65536)
-                            char_range.Font.Color.RGB = bgr_color
+                            # PowerPoint uses RGB format: R + (G * 256) + (B * 65536)
+                            rgb_color = r + (g * 256) + (b * 65536)
+                            char_range.Font.Color.RGB = rgb_color
                     else:
                         # Named colors (basic support)
                         color_map = {
@@ -300,8 +314,14 @@ def apply_html_formatting(text_range, plain_text, segments):
                     bg_value = formatting['background_color']
                     if bg_value.startswith('#'):
                         hex_color = bg_value[1:]
-                        rgb_color = int(hex_color[4:6] + hex_color[2:4] + hex_color[0:2], 16)
-                        char_range.Font.Fill.ForeColor.RGB = rgb_color
+                        if len(hex_color) == 6:
+                            # Extract R, G, B components
+                            r = int(hex_color[0:2], 16)
+                            g = int(hex_color[2:4], 16) 
+                            b = int(hex_color[4:6], 16)
+                            # PowerPoint uses RGB format: R + (G * 256) + (B * 65536)
+                            rgb_color = r + (g * 256) + (b * 65536)
+                            char_range.Font.Fill.ForeColor.RGB = rgb_color
                 except Exception as e:
                     print(f"Warning: Could not apply background color {formatting.get('background_color')}: {e}")
                     
