@@ -6,3 +6,10 @@ win32com
 python-dotenv
 opencv-python
 numpy
+# Phoenix tracing dependencies
+arize-phoenix-otel
+openinference-instrumentation-openai
+openinference-semantic-conventions
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http

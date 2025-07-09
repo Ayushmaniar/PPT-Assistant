@@ -14,6 +14,14 @@ from lightning_slide_context_reader import LightningFastPowerPointSlideReader as
 # Load environment variables from .env file
 load_dotenv()
 
+# Initialize Phoenix tracing
+from phoenix_config import initialize_phoenix, trace_tool_call, add_trace_event, trace_function
+phoenix_initialized = initialize_phoenix()
+if phoenix_initialized:
+    print("✅ Phoenix tracing initialized successfully")
+else:
+    print("⚠️  Phoenix tracing disabled (missing PHOENIX_API_KEY)")
+
 # Set the OpenAI API key from environment
 openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
@@ -59,86 +67,94 @@ def add_textbox(slide_idx: int = 1, html_text: str = "<b>Sample Text</b>", left:
     Returns:
         str: Confirmation message of the textbox addition
     """
-    pythoncom.CoInitialize()
-    
-    try:
-        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
-        presentation = ppt_app.ActivePresentation
+    # Trace the tool call
+    with trace_tool_call("add_textbox", slide_idx=slide_idx, html_text=html_text[:50], 
+                        left=left, top=top, width=width, height=height):
+        pythoncom.CoInitialize()
         
-        # Add slide if needed
-        if presentation.Slides.Count < slide_idx:
-            slide = presentation.Slides.Add(slide_idx, 12)  # 12 = ppLayoutBlank
-        else:
-            slide = presentation.Slides(slide_idx)
-        
-        # Process HTML (always enabled now)
-        # First process lists and headers
-        processed_text, list_info = process_html_lists(html_text)
-        
-        # Then process inline formatting
-        plain_text, format_segments = parse_html_text(processed_text)
-        
-        # Create the textbox
-        box = slide.Shapes.AddTextbox(1, left, top, width, height)
-        text_range = box.TextFrame.TextRange
-        
-        # Apply HTML formatting
-        apply_html_formatting(text_range, plain_text, format_segments)
-        
-        # Apply header formatting
-        for info in list_info:
-            if info['type'] == 'header':
-                try:
-                    # Calculate line position in the text
-                    lines = plain_text.split('\n')
-                    if info['line'] < len(lines):
-                        line_start = sum(len(lines[i]) + 1 for i in range(info['line'])) + 1
-                        line_length = len(lines[info['line']])
-                        
-                        if line_length > 0:
-                            header_range = text_range.Characters(line_start, line_length)
-                            
-                            # Apply header formatting based on level
-                            level = info['level']
-                            if level == 1:
-                                header_range.Font.Size = (font_size or 14) + 8
-                                header_range.Font.Bold = -1
-                            elif level == 2:
-                                header_range.Font.Size = (font_size or 14) + 4
-                                header_range.Font.Bold = -1
-                            elif level == 3:
-                                header_range.Font.Size = (font_size or 14) + 2
-                                header_range.Font.Bold = -1
-                except Exception as e:
-                    print(f"Warning: Could not apply header formatting: {e}")
-        
-        # Apply global font settings (font_name and base font_size for non-headers)
-        if font_name:
-            text_range.Font.Name = font_name
-        
-        # Set text alignment
-        alignment_map = {
-            "left": 1,
-            "center": 2, 
-            "right": 3
-        }
-        
-        if text_align.lower() in alignment_map:
-            text_range.ParagraphFormat.Alignment = alignment_map[text_align.lower()]
-        
-        # Clear slide context cache to ensure fresh context on next request
         try:
-            from slide_context_reader import PowerPointSlideReader
-            reader = get_slide_reader()
-            if reader:
-                reader.clear_context_cache()
+            add_trace_event("powerpoint_connection", action="connecting_to_application")
+            ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
+            presentation = ppt_app.ActivePresentation
+            
+            # Add slide if needed
+            if presentation.Slides.Count < slide_idx:
+                slide = presentation.Slides.Add(slide_idx, 12)  # 12 = ppLayoutBlank
+            else:
+                slide = presentation.Slides(slide_idx)
+            
+            add_trace_event("html_processing", action="processing_html_content")
+            # Process HTML (always enabled now)
+            # First process lists and headers
+            processed_text, list_info = process_html_lists(html_text)
+            
+            # Then process inline formatting
+            plain_text, format_segments = parse_html_text(processed_text)
+            
+            # Create the textbox
+            add_trace_event("textbox_creation", action="creating_textbox", slide=slide_idx)
+            box = slide.Shapes.AddTextbox(1, left, top, width, height)
+            text_range = box.TextFrame.TextRange
+            
+            # Apply HTML formatting
+            apply_html_formatting(text_range, plain_text, format_segments)
+            
+            # Apply header formatting
+            for info in list_info:
+                if info['type'] == 'header':
+                    try:
+                        # Calculate line position in the text
+                        lines = plain_text.split('\n')
+                        if info['line'] < len(lines):
+                            line_start = sum(len(lines[i]) + 1 for i in range(info['line'])) + 1
+                            line_length = len(lines[info['line']])
+                            
+                            if line_length > 0:
+                                header_range = text_range.Characters(line_start, line_length)
+                                
+                                # Apply header formatting based on level
+                                level = info['level']
+                                if level == 1:
+                                    header_range.Font.Size = (font_size or 14) + 8
+                                    header_range.Font.Bold = -1
+                                elif level == 2:
+                                    header_range.Font.Size = (font_size or 14) + 4
+                                    header_range.Font.Bold = -1
+                                elif level == 3:
+                                    header_range.Font.Size = (font_size or 14) + 2
+                                    header_range.Font.Bold = -1
+                    except Exception as e:
+                        print(f"Warning: Could not apply header formatting: {e}")
+            
+            # Apply global font settings (font_name and base font_size for non-headers)
+            if font_name:
+                text_range.Font.Name = font_name
+            
+            # Set text alignment
+            alignment_map = {
+                "left": 1,
+                "center": 2, 
+                "right": 3
+            }
+            
+            if text_align.lower() in alignment_map:
+                text_range.ParagraphFormat.Alignment = alignment_map[text_align.lower()]
+            
+            # Clear slide context cache to ensure fresh context on next request
+            try:
+                from slide_context_reader import PowerPointSlideReader
+                reader = get_slide_reader()
+                if reader:
+                    reader.clear_context_cache()
+            except Exception as e:
+                pass  # Silently continue if cache clearing fails
+            
+            add_trace_event("textbox_completed", success=True, text_length=len(plain_text))
+            return f"Textbox added to slide {slide_idx} with HTML formatting: {plain_text[:50]}{'...' if len(plain_text) > 50 else ''}"
+            
         except Exception as e:
-            pass  # Silently continue if cache clearing fails
-        
-        return f"Textbox added to slide {slide_idx} with HTML formatting: {plain_text[:50]}{'...' if len(plain_text) > 50 else ''}"
-        
-    except Exception as e:
-        return f"Error adding textbox: {str(e)}"
+            add_trace_event("textbox_error", error=str(e), error_type=type(e).__name__)
+            return f"Error adding textbox: {str(e)}"
 
 @tool
 def replace_textbox_content(id: int, html_text: str, font_size: int = None, font_name: str = None, text_align: str = None) -> str:
@@ -1125,126 +1141,134 @@ def run_agent_with_code_capture(message):
     Returns:
         dict: Contains 'answer', 'generated_code', and 'slide_context' keys
     """
-    try:
-        # Get current slide context
-        slide_context = get_current_slide_context()
-        
-        # Debug: Print current slide info (you can remove this later)
-        if "Slide:" in slide_context:
-            slide_line = [line for line in slide_context.split('\n') if line.startswith('Slide:')]
-            if slide_line:
-                print(f"🎯 Current slide context: {slide_line[0]}")
-        
-        # Enhance the message with slide context
-        enhanced_message = f"""CURRENT SLIDE CONTEXT:
+    # Trace the entire agent interaction
+    with trace_tool_call("agent_interaction", user_message=message[:100]):
+        try:
+            add_trace_event("agent_start", user_message=message)
+            
+            # Get current slide context
+            add_trace_event("context_retrieval", action="getting_slide_context")
+            slide_context = get_current_slide_context()
+            
+            # Debug: Print current slide info (you can remove this later)
+            if "Slide:" in slide_context:
+                slide_line = [line for line in slide_context.split('\n') if line.startswith('Slide:')]
+                if slide_line:
+                    print(f"🎯 Current slide context: {slide_line[0]}")
+            
+            # Enhance the message with slide context
+            enhanced_message = f"""CURRENT SLIDE CONTEXT:
 {slide_context}
 
 USER REQUEST:
 {message}
 
 INSTRUCTIONS: Please consider the current slide context above when processing the user's request. If the user is asking to modify, add to, or work with the current slide, use the context information to make informed decisions about positioning, styling, and content placement."""
-        
-        # Clear previous captured code
-        code_capture_handler.clear()
-        
-        # Set up logging to capture the agent's output
-        logger = logging.getLogger()
-        logger.addHandler(code_capture_handler)
-        logger.setLevel(logging.DEBUG)
-        
-        # Capture stdout/stderr as well
-        stdout_backup = sys.stdout
-        stderr_backup = sys.stderr
-        stdout_capture = io.StringIO()
-        stderr_capture = io.StringIO()
-        
-        try:
-            sys.stdout = stdout_capture
-            sys.stderr = stderr_capture
             
-            # Run the agent with enhanced message
-            answer = agent.run(enhanced_message)
+            # Clear previous captured code
+            code_capture_handler.clear()
             
-        finally:
-            # Restore stdout/stderr
-            sys.stdout = stdout_backup
-            sys.stderr = stderr_backup
-            logger.removeHandler(code_capture_handler)
-        
-        # Get captured outputs and clean them
-        stdout_content = strip_ansi_codes(stdout_capture.getvalue())
-        stderr_content = strip_ansi_codes(stderr_capture.getvalue())
-        captured_code = strip_ansi_codes(code_capture_handler.get_code())
-        
-        # IMPORTANT: Force refresh the slide context after agent execution
-        # This ensures that any objects added/deleted by the agent are reflected in the context
-        try:
-            reader = get_slide_reader()
-            if reader and reader.ppt_app:
-                # Force refresh the context to reflect any changes made by the agent
-                updated_context = reader.force_refresh_context()
-                print("✅ Slide context refreshed after agent execution")
-            else:
-                updated_context = slide_context
-        except Exception as e:
-            print(f"⚠️ Warning: Could not refresh context after execution: {e}")
-            updated_context = slide_context
-        
-        # Try to extract code from various sources
-        generated_code = ""
-        
-        # First, try the captured code from logs
-        if captured_code.strip():
-            generated_code = captured_code
-        
-        # Next, try to extract from stdout
-        elif stdout_content:
-            # Look for code patterns in stdout
-            import re
+            # Set up logging to capture the agent's output
+            logger = logging.getLogger()
+            logger.addHandler(code_capture_handler)
+            logger.setLevel(logging.DEBUG)
             
-            # Look for function definitions and imports
-            code_patterns = [
-                r'(def\s+\w+.*?(?=\n\w|\n$))',  # Function definitions
-                r'(import\s+\w+.*)',  # Import statements
-                r'(from\s+\w+.*)',  # From imports
-                r'(\w+\s*=\s*.*)',  # Assignments
-            ]
+            # Capture stdout/stderr as well
+            stdout_backup = sys.stdout
+            stderr_backup = sys.stderr
+            stdout_capture = io.StringIO()
+            stderr_capture = io.StringIO()
             
-            for pattern in code_patterns:
-                matches = re.findall(pattern, stdout_content, re.MULTILINE | re.DOTALL)
-                if matches:
-                    generated_code += '\n'.join(matches) + '\n'
-        
-        # If still no code, try to extract from the answer itself
-        if not generated_code.strip():
-            import re
-            # Clean the answer first
-            clean_answer = strip_ansi_codes(answer)
-            
-            # Look for code blocks in the answer
-            code_blocks = re.findall(r'```(?:python)?\n?(.*?)\n?```', clean_answer, re.DOTALL)
-            if code_blocks:
-                generated_code = '\n'.join(code_blocks)
-            else:
-                # Look for Python-like statements in the answer
-                lines = clean_answer.split('\n')
-                code_lines = []
-                for line in lines:
-                    stripped = line.strip()
-                    if any(keyword in stripped for keyword in ['def ', 'import ', 'from ', '=', 'print(', 'if ', 'for ', 'with ', 'try:']):
-                        code_lines.append(line)
-                if code_lines:
-                    generated_code = '\n'.join(code_lines)
-        
-        # Fallback message if no code was captured
-        if not generated_code.strip():
-            # Create a summary based on the tool that was likely used
-            if "textbox" in message.lower() or "add" in message.lower():
-                tool_name = "add_textbox_tool"
-            else:
-                tool_name = "PowerPoint automation tool"
+            try:
+                sys.stdout = stdout_capture
+                sys.stderr = stderr_capture
                 
-            generated_code = f"""# Agent Execution Summary
+                # Run the agent with enhanced message
+                add_trace_event("agent_execution", action="running_smolagent", enhanced_message_length=len(enhanced_message))
+                answer = agent.run(enhanced_message)
+                add_trace_event("agent_response", answer_length=len(answer) if answer else 0)
+                
+            finally:
+                # Restore stdout/stderr
+                sys.stdout = stdout_backup
+                sys.stderr = stderr_backup
+                logger.removeHandler(code_capture_handler)
+            
+            # Get captured outputs and clean them
+            stdout_content = strip_ansi_codes(stdout_capture.getvalue())
+            stderr_content = strip_ansi_codes(stderr_capture.getvalue())
+            captured_code = strip_ansi_codes(code_capture_handler.get_code())
+            
+            # IMPORTANT: Force refresh the slide context after agent execution
+            # This ensures that any objects added/deleted by the agent are reflected in the context
+            try:
+                add_trace_event("context_refresh", action="refreshing_slide_context")
+                reader = get_slide_reader()
+                if reader and reader.ppt_app:
+                    # Force refresh the context to reflect any changes made by the agent
+                    updated_context = reader.force_refresh_context()
+                    print("✅ Slide context refreshed after agent execution")
+                else:
+                    updated_context = slide_context
+            except Exception as e:
+                print(f"⚠️ Warning: Could not refresh context after execution: {e}")
+                updated_context = slide_context
+            
+            # Try to extract code from various sources
+            generated_code = ""
+            
+            # First, try the captured code from logs
+            if captured_code.strip():
+                generated_code = captured_code
+            
+            # Next, try to extract from stdout
+            elif stdout_content:
+                # Look for code patterns in stdout
+                import re
+                
+                # Look for function definitions and imports
+                code_patterns = [
+                    r'(def\s+\w+.*?(?=\n\w|\n$))',  # Function definitions
+                    r'(import\s+\w+.*)',  # Import statements
+                    r'(from\s+\w+.*)',  # From imports
+                    r'(\w+\s*=\s*.*)',  # Assignments
+                ]
+                
+                for pattern in code_patterns:
+                    matches = re.findall(pattern, stdout_content, re.MULTILINE | re.DOTALL)
+                    if matches:
+                        generated_code += '\n'.join(matches) + '\n'
+            
+            # If still no code, try to extract from the answer itself
+            if not generated_code.strip():
+                import re
+                # Clean the answer first
+                clean_answer = strip_ansi_codes(answer)
+                
+                # Look for code blocks in the answer
+                code_blocks = re.findall(r'```(?:python)?\n?(.*?)\n?```', clean_answer, re.DOTALL)
+                if code_blocks:
+                    generated_code = '\n'.join(code_blocks)
+                else:
+                    # Look for Python-like statements in the answer
+                    lines = clean_answer.split('\n')
+                    code_lines = []
+                    for line in lines:
+                        stripped = line.strip()
+                        if any(keyword in stripped for keyword in ['def ', 'import ', 'from ', '=', 'print(', 'if ', 'for ', 'with ', 'try:']):
+                            code_lines.append(line)
+                    if code_lines:
+                        generated_code = '\n'.join(code_lines)
+            
+            # Fallback message if no code was captured
+            if not generated_code.strip():
+                # Create a summary based on the tool that was likely used
+                if "textbox" in message.lower() or "add" in message.lower():
+                    tool_name = "add_textbox_tool"
+                else:
+                    tool_name = "PowerPoint automation tool"
+                    
+                generated_code = f"""# Agent Execution Summary
 # Request: "{message}"
 # 
 # The agent executed your request using the {tool_name}().
@@ -1266,24 +1290,32 @@ presentation = ppt_app.ActivePresentation
 
 # Tool executed with your parameters
 # Result: {strip_ansi_codes(answer) if answer else 'Operation completed'}"""
-        
-        # Clean the final answer
-        clean_answer = strip_ansi_codes(answer) if answer else "Operation completed"
-        
-        return {
-            'answer': clean_answer,
-            'generated_code': generated_code,
-            'slide_context': updated_context,
-            'debug_output': f"STDOUT:\n{stdout_content}\n\nSTDERR:\n{stderr_content}"
-        }
-        
-    except Exception as e:
-        return {
-            'answer': f"Error: {str(e)}",
-            'generated_code': f"# Error occurred during execution:\n# {str(e)}\n\n# This might be due to:\n# - Missing dependencies\n# - PowerPoint not running\n# - Invalid parameters",
-            'slide_context': "Error reading slide context",
-            'debug_output': str(e)
-        }
+            
+            # Clean the final answer
+            clean_answer = strip_ansi_codes(answer) if answer else "Operation completed"
+            
+            add_trace_event("agent_completed", 
+                success=True, 
+                answer_length=len(clean_answer),
+                code_generated=bool(generated_code.strip()),
+                context_updated=bool(updated_context != slide_context)
+            )
+            
+            return {
+                'answer': clean_answer,
+                'generated_code': generated_code,
+                'slide_context': updated_context,
+                'debug_output': f"STDOUT:\n{stdout_content}\n\nSTDERR:\n{stderr_content}"
+            }
+            
+        except Exception as e:
+            add_trace_event("agent_error", error=str(e), error_type=type(e).__name__)
+            return {
+                'answer': f"Error: {str(e)}",
+                'generated_code': f"# Error occurred during execution:\n# {str(e)}\n\n# This might be due to:\n# - Missing dependencies\n# - PowerPoint not running\n# - Invalid parameters",
+                'slide_context': "Error reading slide context",
+                'debug_output': str(e)
+            }
 
 def run_agent_with_slide_context(message):
     """
