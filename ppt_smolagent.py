@@ -1324,9 +1324,7 @@ def run_agent_with_vision_support(message, image_base64=None):
                     print(f"🎯 Current slide context: {slide_line[0]}")
             
             # Create the vision message with image
-            system_message = f"""You are a highly capable AI assistant that automates Microsoft PowerPoint presentations using specialized tools.
-
-{instructions}
+            system_message = f"""
 
 CURRENT SLIDE CONTEXT:
 {slide_context}"""
