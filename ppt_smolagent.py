@@ -926,51 +926,6 @@ USE THIS CONTEXT in your THOUGHT process to make informed decisions about positi
 
 - NOTE : NEVER USE ANY EMOTICONS OR EMOJIS.
 
-1. **replace_textbox_content(id, html_text)** 
-   - COMPLETELY REPLACES all text in a textbox
-   - Use when: User wants to change entire content
-   - Example: "Change the title to 'New Title'"
-
-2. **modify_text_in_textbox(id, find_pattern, replacement_text)**
-   - FINDS and REPLACES specific words/phrases only
-   - PRESERVES all other existing text
-   - Use when: User wants to modify specific words
-   - Example: "Make 'Company Name' bold" or "Change 'red' to 'blue'"
-
-3. **add_text_to_textbox(id, html_text, position)**
-   - ADDS text to beginning ("start") or end ("end") of existing content
-   - Use when: User wants to append/prepend text
-   - Example: "Add 'Confidential' to the end"
-
-4. **format_textbox_style(id, font_size, font_name, text_align, etc.)**
-   - Changes visual formatting WITHOUT modifying text content
-   - Use when: User wants to change appearance only
-   - Example: "Make the text center-aligned" or "Change font to Arial"
-
-🎨 HTML FORMATTING SYNTAX:
-- <b>bold</b> or <strong>bold</strong> - Bold text
-- <i>italic</i> or <em>italic</em> - Italic text  
-- <s>strikethrough</s> or <del>strikethrough</del> - Strikethrough text
-- <u>underlined</u> - Underlined text
-- <span style="color: red">colored</span> - Colored text (hex #FF0000 or color names)
-- <span style="background-color: yellow">highlighted</span> - Background color
-- <h1>Header 1</h1>, <h2>Header 2</h2>, <h3>Header 3</h3> - Headers (auto-sized)
-- <ul><li>bullet point</li></ul> - Bullet lists
-- <ol><li>numbered item</li></ol> - Numbered lists
-
-📐 POSITIONING TOOLS:
-
-1. **move_object(id, left, top)** - Move object to new position
-2. **resize_object(id, width, height)** - Change object size  
-3. **position_and_resize_object(id, left, top, width, height)** - Move and resize in one operation
-
-📋 OBJECT MANAGEMENT:
-
-1. **get_object_properties(id)** - Inspect object details before modifying
-2. **copy_object_to_slide(id, target_slide, new_left, new_top)** - Copy to another slide
-3. **duplicate_object_on_same_slide(id, offset_left, offset_top)** - Duplicate with offset
-4. **delete_object(id)** - Permanently remove object
-
 📏 SLIDE COORDINATE SYSTEM:
 - Origin (0,0) = top-left corner
 - Standard slide: 960 points wide × 540 points tall  
@@ -981,17 +936,9 @@ USE THIS CONTEXT in your THOUGHT process to make informed decisions about positi
 - Choose the most specific tool for each task
 - Consider existing content positioning when adding new elements
 - Match existing fonts/styles when appropriate for consistency
-- **ALWAYS end with final_answer() to report completion status and summary**
 - **LEVERAGE MULTI-TOOL ACTIONS**: Use multiple tools together when they accomplish related goals efficiently
 
-🏁 TASK COMPLETION:
-When you have successfully completed all requested tasks:
-1. Provide a final THOUGHT summarizing what was accomplished
-2. Use final_answer() tool to report the completion status
-3. Include a clear summary of what was changed/added/modified
-4. Example: final_answer("Successfully added title and formatted text. All requested changes have been completed.")
-
-Remember: Only modify slides when the user specifically requests changes. For informational questions about slide content, respond without using tools but still follow the THOUGHT→OBSERVATION pattern.
+Remember: Only modify slides when the user specifically requests changes.
 """
 
 # Create a custom logging handler to capture code generation
@@ -1018,42 +965,6 @@ code_capture_handler = CodeCaptureHandler()
 
 # Global slide context reader instance
 slide_reader = None
-
-@tool
-def get_current_slide_context_html(force_refresh: bool = False) -> str:
-    """
-    Get the current PowerPoint slide context with ALL text content in HTML format.
-    
-    *** IMPORTANT: This tool returns text content in HTML format ***
-    
-    The returned context includes HTML tags for formatting:
-    - <b>bold text</b> for bold formatting
-    - <i>italic text</i> for italic formatting
-    - <u>underlined text</u> for underlined formatting  
-    - <s>strikethrough text</s> for strikethrough formatting
-    - <span style="color: #RRGGBB">colored text</span> for colored text
-    
-    Use this context to understand the current slide content and formatting.
-    When modifying text, you can use these same HTML tags in your tool calls.
-    
-    Args:
-        force_refresh: If True, force a fresh read of the slide (ignore cache)
-    
-    Returns:
-        str: The current slide context with HTML-formatted text content
-    """
-    try:
-        reader = get_slide_reader()
-        if reader and reader.ppt_app:
-            if force_refresh:
-                context = reader.force_refresh_context()
-            else:
-                context = reader.get_current_context()
-            return context if context else "No slide context available"
-        else:
-            return "PowerPoint not connected - no slide context available"
-    except Exception as e:
-        return f"Error reading slide context: {e}"
 
 def get_slide_reader():
     """Get or create the global slide reader instance."""
@@ -1225,8 +1136,7 @@ def run_agent_with_code_capture(message):
 
 USER REQUEST:
 {message}
-
-INSTRUCTIONS: Please consider the current slide context above when processing the user's request. If the user is asking to modify, add to, or work with the current slide, use the context information to make informed decisions about positioning, styling, and content placement."""
+"""
             
             # Clear previous captured code
             code_capture_handler.clear()
