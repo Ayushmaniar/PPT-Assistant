@@ -184,9 +184,32 @@ class PPTAssistant:
         input_container = tk.Frame(self.chat_frame, bg=self.card_bg, relief="flat")
         input_container.pack(fill=tk.X, padx=20, pady=(0, 20))
 
+        # Vision controls frame
+        vision_frame = tk.Frame(input_container, bg=self.card_bg)
+        vision_frame.pack(fill=tk.X, padx=15, pady=(15, 5))
+        
+        # Vision toggle checkbox
+        self.vision_enabled = tk.BooleanVar(value=False)
+        self.vision_checkbox = tk.Checkbutton(
+            vision_frame,
+            text="🔍 Vision Mode (Include annotated slide image for AI analysis)",
+            variable=self.vision_enabled,
+            bg=self.card_bg,
+            fg=self.sys_msg_fg,
+            font=("Segoe UI", 10),
+            activebackground=self.card_bg,
+            activeforeground=self.accent_color,
+            selectcolor=self.card_bg,
+            bd=0,
+            highlightthickness=0,
+            relief="flat",
+            cursor="hand2"
+        )
+        self.vision_checkbox.pack(anchor="w")
+
         # Input frame with modern styling
         entry_frame = tk.Frame(input_container, bg=self.card_bg)
-        entry_frame.pack(fill=tk.X, padx=15, pady=15)
+        entry_frame.pack(fill=tk.X, padx=15, pady=(5, 15))
 
         # Custom entry with placeholder effect
         self.entry = tk.Entry(
@@ -1226,10 +1249,15 @@ modify_text_in_textbox(
         # Use the smolagent to process the message and execute the tool
         try:
             # Show modern processing message
-            self.log("[System] 🔄 Processing your request...")
+            vision_status = "with vision analysis" if self.vision_enabled.get() else ""
+            self.log(f"[System] 🔄 Processing your request {vision_status}...")
             self.root.update()  # Force UI update
             
-            result = ppt_smolagent.run_agent_with_code_capture(msg)
+            # Check if vision mode is enabled
+            if self.vision_enabled.get():
+                result = self.run_agent_with_vision(msg)
+            else:
+                result = ppt_smolagent.run_agent_with_code_capture(msg)
             
             # Display the final answer with emoji
             self.log(f"[System] ✅ {result['answer']}")
@@ -1249,6 +1277,50 @@ modify_text_in_textbox(
         except Exception as e:
             self.log(f"[System] ❌ Error: {e}")
             self.update_code_display(f"# ❌ Error occurred during execution:\n# {str(e)}\n\n# 🔍 Please check:\n# - PowerPoint is running\n# - Valid presentation is open\n# - Network connection for AI model")
+
+    def run_agent_with_vision(self, message):
+        """
+        Run the agent with vision mode enabled, including visual slide context.
+        
+        Args:
+            message: User's message/request
+            
+        Returns:
+            dict: Contains 'answer' and 'generated_code' keys
+        """
+        try:
+            # Get enhanced context with visual information
+            context_data = ppt_smolagent.get_enhanced_slide_context_with_vision(force_refresh=False)
+            
+            if not context_data['success']:
+                # Fallback to normal mode if vision fails
+                self.log("[System] ⚠️ Vision mode failed, falling back to text-only mode...")
+                return ppt_smolagent.run_agent_with_code_capture(message)
+            
+            # Check if we have actual image data
+            if context_data['image_base64']:
+                # Use the new vision-enabled agent with actual image data
+                self.log("[System] 🔍 Sending image to vision model...")
+                result = ppt_smolagent.run_agent_with_vision_support(message, context_data['image_base64'])
+                return result
+            else:
+                # Fallback to enhanced text-only mode if image generation failed
+                self.log("[System] ⚠️ No image data available, using enhanced text context...")
+                enhanced_message = f"""CURRENT SLIDE CONTEXT (WITH VISUAL ANALYSIS):
+{context_data['combined_context']}
+
+USER REQUEST:
+{message}
+
+INSTRUCTIONS: You have enhanced textual context that includes detailed visual descriptions of the current slide. The visual representation describes the spatial layout and relationships between elements with annotated object IDs. Use this comprehensive context to provide more accurate and visually-aware assistance with slide design, layout, and content positioning."""
+
+                result = ppt_smolagent.run_agent_with_code_capture(enhanced_message)
+                return result
+            
+        except Exception as e:
+            # Fallback to normal mode on any error
+            self.log(f"[System] ⚠️ Vision mode error: {str(e)}, falling back to text-only mode...")
+            return ppt_smolagent.run_agent_with_code_capture(message)
 
 if __name__ == "__main__":
     root = tk.Tk()

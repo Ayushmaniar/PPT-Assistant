@@ -5,6 +5,7 @@ import numpy as np
 import os
 from slide_context_reader import PowerPointSlideReader
 import time
+import base64
 
 class SlideVisualizer:
     def __init__(self):
@@ -18,6 +19,48 @@ class SlideVisualizer:
         self.presentation = self.reader.presentation
         self.slide_width_points = self.presentation.PageSetup.SlideWidth
         self.slide_height_points = self.presentation.PageSetup.SlideHeight
+
+    @staticmethod
+    def image_to_base64(image, format='JPEG', quality=85):
+        """
+        Convert an OpenCV image to base64 string for vision model input.
+        
+        Args:
+            image: OpenCV image (numpy array)
+            format: Image format ('JPEG', 'PNG')
+            quality: JPEG quality (1-100, only used for JPEG)
+            
+        Returns:
+            str: Base64 encoded image string with data URI prefix
+        """
+        if image is None:
+            return None
+            
+        try:
+            # Encode image to bytes
+            if format.upper() == 'JPEG':
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+                success, buffer = cv2.imencode('.jpg', image, encode_param)
+                mime_type = 'image/jpeg'
+            elif format.upper() == 'PNG':
+                success, buffer = cv2.imencode('.png', image)
+                mime_type = 'image/png'
+            else:
+                raise ValueError(f"Unsupported format: {format}")
+                
+            if not success:
+                print(f"❌ Failed to encode image to {format}")
+                return None
+                
+            # Convert to base64
+            image_base64 = base64.b64encode(buffer).decode('utf-8')
+            
+            # Return with data URI prefix
+            return f"data:{mime_type};base64,{image_base64}"
+            
+        except Exception as e:
+            print(f"❌ Error converting image to base64: {e}")
+            return None
 
     def _get_slide_export_dimensions(self, image_width):
         """Calculates the export height based on a given width to maintain aspect ratio."""
@@ -98,6 +141,82 @@ class SlideVisualizer:
         except Exception as e:
             print(f"❌ An error occurred while generating the downsampled image: {e}")
             return None
+
+    def get_visual_context_for_agent(self, target_width=512, include_description=True):
+        """
+        Generate visual context for the AI agent including base64 image and description.
+        
+        Args:
+            target_width: Width for the downsampled image
+            include_description: Whether to include descriptive text about the image
+            
+        Returns:
+            dict: Contains 'image_base64', 'description', and 'success' keys
+        """
+        try:
+            # Get the downsampled annotated image
+            image = self.get_downsampled_slide_image(target_width=target_width)
+            
+            if image is None:
+                return {
+                    'success': False,
+                    'image_base64': None,
+                    'description': 'Failed to generate slide image'
+                }
+            
+            # Convert to base64
+            image_base64 = self.image_to_base64(image, format='JPEG', quality=80)
+            
+            if image_base64 is None:
+                return {
+                    'success': False,
+                    'image_base64': None,
+                    'description': 'Failed to convert image to base64'
+                }
+            
+            # Generate description
+            description = ""
+            if include_description:
+                description = f"""
+=== VISUAL SLIDE REPRESENTATION ===
+
+This is an annotated visual representation of the current PowerPoint slide with the following features:
+
+🔍 VISUAL ANNOTATIONS:
+- Green bounding boxes highlight all interactive objects/shapes on the slide
+- Yellow labels show unique object IDs (e.g., "ID:123") for precise reference
+- Image is downsampled to {target_width}px width for efficient processing
+- All text, images, charts, and other slide elements are visually represented
+
+💡 HOW TO USE THIS IMAGE:
+- Use this visual context to understand the spatial layout of slide elements
+- Reference object IDs when making modifications (the IDs match the textual context)
+- Analyze positioning, sizing, and visual relationships between elements
+- Identify visual design issues, alignment problems, or layout improvements
+- This complements the textual slide context for comprehensive understanding
+
+⚠️ IMPORTANT NOTES:
+- Object IDs in yellow labels correspond exactly to the IDs in the textual context
+- Use the textual context for precise measurements and detailed properties
+- This image shows the current state of the slide at the time of generation
+- Visual and textual contexts are synchronized and represent the same slide state
+
+This visual representation enables you to provide more accurate and contextually aware assistance with slide design, layout, and content positioning.
+=== END VISUAL CONTEXT ===
+"""
+            
+            return {
+                'success': True,
+                'image_base64': image_base64,
+                'description': description.strip()
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'image_base64': None,
+                'description': f'Error generating visual context: {str(e)}'
+            }
 
     def create_highlighted_slide_image(self, output_path="highlighted_slide.png", export_width=1920, border_size=50):
         """

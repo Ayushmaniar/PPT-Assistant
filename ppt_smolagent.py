@@ -29,7 +29,7 @@ if not openai_api_key:
 
 # Define the model using OpenAIServerModel
 model = OpenAIServerModel(
-    model_id="gpt-4.1",
+    model_id="gpt-4o-mini",
     api_key=openai_api_key,
     api_base = "https://api.openai.com/v1"
 )
@@ -1084,6 +1084,69 @@ def get_current_slide_context(force_refresh=False):
     except Exception as e:
         return f"Error reading slide context: {e}"
 
+def get_enhanced_slide_context_with_vision(force_refresh=False, target_width=512):
+    """
+    Get the current slide context enhanced with visual representation.
+    
+    Args:
+        force_refresh: If True, force a fresh read of the slide
+        target_width: Width for the downsampled image
+        
+    Returns:
+        dict: Contains 'textual_context', 'visual_context', 'image_base64', and 'success' keys
+    """
+    try:
+        # Get textual context
+        textual_context = get_current_slide_context(force_refresh=force_refresh)
+        
+        # Import and initialize the visualizer
+        from slide_visualizer import SlideVisualizer
+        
+        try:
+            visualizer = SlideVisualizer()
+            visual_data = visualizer.get_visual_context_for_agent(
+                target_width=target_width, 
+                include_description=True
+            )
+            
+            if visual_data['success']:
+                print("passed vision context")
+                return {
+                    'success': True,
+                    'textual_context': textual_context,
+                    'visual_context': visual_data['description'],
+                    'image_base64': visual_data['image_base64'],
+                    'combined_context': f"{textual_context}\n\n{visual_data['description']}"
+                }
+            else:
+                # Fallback to textual context only if visual fails
+                return {
+                    'success': True,
+                    'textual_context': textual_context,
+                    'visual_context': f"⚠️ Visual context unavailable: {visual_data['description']}",
+                    'image_base64': None,
+                    'combined_context': f"{textual_context}\n\n⚠️ Visual context unavailable: {visual_data['description']}"
+                }
+                
+        except Exception as visual_error:
+            # Fallback to textual context only if visualizer fails
+            return {
+                'success': True,
+                'textual_context': textual_context,
+                'visual_context': f"⚠️ Visual context error: {str(visual_error)}",
+                'image_base64': None,
+                'combined_context': f"{textual_context}\n\n⚠️ Visual context error: {str(visual_error)}"
+            }
+            
+    except Exception as e:
+        return {
+            'success': False,
+            'textual_context': f"Error reading slide context: {e}",
+            'visual_context': "Visual context unavailable due to textual context error",
+            'image_base64': None,
+            'combined_context': f"Error reading slide context: {e}"
+        }
+
 def get_fresh_slide_context():
     """Get a completely fresh slide context, ignoring any cache."""
     return get_current_slide_context(force_refresh=True)
@@ -1316,6 +1379,172 @@ presentation = ppt_app.ActivePresentation
                 'slide_context': "Error reading slide context",
                 'debug_output': str(e)
             }
+
+def run_agent_with_vision_support(message, image_base64=None):
+    """
+    Run the agent with vision support, including base64 image data if provided.
+    This directly calls the OpenAI API with proper vision formatting.
+    
+    Args:
+        message (str): The user's request/message
+        image_base64 (str): Base64 encoded image with data URI prefix
+        
+    Returns:
+        dict: Contains 'answer', 'generated_code', 'slide_context', and 'debug_output'
+    """
+    if not image_base64:
+        # Fall back to regular text-only processing
+        return run_agent_with_code_capture(message)
+    
+    # Trace the vision-enabled agent interaction
+    with trace_tool_call("vision_agent_interaction", user_message=message[:100], has_image=bool(image_base64)):
+        try:
+            import openai
+            
+            add_trace_event("vision_agent_start", user_message=message, has_image=True)
+            
+            # Get current slide context
+            add_trace_event("context_retrieval", action="getting_slide_context")
+            slide_context = get_current_slide_context()
+            
+            # Debug: Print current slide info
+            if "Slide:" in slide_context:
+                slide_line = [line for line in slide_context.split('\n') if line.startswith('Slide:')]
+                if slide_line:
+                    print(f"🎯 Current slide context: {slide_line[0]}")
+            
+            # Create the vision message with image
+            system_message = f"""You are a highly capable AI assistant that automates Microsoft PowerPoint presentations using specialized tools.
+
+{instructions}
+
+CURRENT SLIDE CONTEXT:
+{slide_context}"""
+
+            user_content = [
+                {
+                    "type": "text", 
+                    "text": f"""USER REQUEST:
+{message}
+
+INSTRUCTIONS: You have both textual slide context and a visual representation of the current slide. The image shows the spatial layout with annotated object IDs that correspond to the textual context. Use this comprehensive information to provide accurate and visually-aware assistance."""
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": image_base64
+                    }
+                }
+            ]
+            
+            # Clear previous captured code
+            code_capture_handler.clear()
+            
+            # Set up logging to capture output
+            logger = logging.getLogger()
+            logger.addHandler(code_capture_handler)
+            logger.setLevel(logging.DEBUG)
+            
+            # Capture stdout/stderr
+            stdout_backup = sys.stdout
+            stderr_backup = sys.stderr
+            stdout_capture = io.StringIO()
+            stderr_capture = io.StringIO()
+            
+            try:
+                sys.stdout = stdout_capture
+                sys.stderr = stderr_capture
+                
+                # Initialize OpenAI client
+                client = openai.OpenAI(api_key=openai_api_key)
+                
+                # Make the vision API call
+                add_trace_event("vision_api_call", action="calling_openai_vision_api")
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": user_content}
+                    ],
+                    max_tokens=1000,
+                    temperature=0.1
+                )
+                
+                answer = response.choices[0].message.content
+                add_trace_event("vision_api_response", answer_length=len(answer) if answer else 0)
+                
+            finally:
+                # Restore stdout/stderr
+                sys.stdout = stdout_backup
+                sys.stderr = stderr_backup
+                logger.removeHandler(code_capture_handler)
+            
+            # Get captured outputs and clean them
+            stdout_content = strip_ansi_codes(stdout_capture.getvalue())
+            stderr_content = strip_ansi_codes(stderr_capture.getvalue())
+            captured_code = strip_ansi_codes(code_capture_handler.get_code())
+            
+            # Force refresh the slide context after processing
+            try:
+                add_trace_event("context_refresh", action="refreshing_slide_context")
+                reader = get_slide_reader()
+                if reader and reader.ppt_app:
+                    updated_context = reader.force_refresh_context()
+                    print("✅ Slide context refreshed after vision agent execution")
+                else:
+                    updated_context = slide_context
+            except Exception as e:
+                print(f"⚠️ Warning: Could not refresh context after execution: {e}")
+                updated_context = slide_context
+            
+            # Extract any code patterns from the response
+            generated_code = ""
+            if captured_code.strip():
+                generated_code = captured_code
+            elif answer:
+                import re
+                # Look for code blocks in the answer
+                code_blocks = re.findall(r'```(?:python)?\n?(.*?)\n?```', answer, re.DOTALL)
+                if code_blocks:
+                    generated_code = '\n'.join(code_blocks)
+            
+            # Fallback if no code was generated
+            if not generated_code.strip():
+                generated_code = f"""# Vision-Enhanced Agent Response
+# Request: "{message}"
+# 
+# The vision-enabled agent analyzed both the textual context and visual representation of your slide.
+# This response includes spatial and layout awareness that was not available in text-only mode.
+#
+# Vision analysis provided enhanced understanding of:
+# - Object positions and relationships
+# - Visual layout and design elements  
+# - Spatial context for positioning decisions
+#
+# Response: {answer[:200] if answer else 'Operation completed'}{'...' if answer and len(answer) > 200 else ''}"""
+            
+            # Clean the final answer
+            clean_answer = strip_ansi_codes(answer) if answer else "Vision analysis completed"
+            
+            add_trace_event("vision_agent_completed", 
+                success=True, 
+                answer_length=len(clean_answer),
+                code_generated=bool(generated_code.strip()),
+                context_updated=bool(updated_context != slide_context)
+            )
+            
+            return {
+                'answer': clean_answer,
+                'generated_code': generated_code,
+                'slide_context': updated_context,
+                'debug_output': f"VISION MODE ENABLED\nSTDOUT:\n{stdout_content}\n\nSTDERR:\n{stderr_content}"
+            }
+            
+        except Exception as e:
+            add_trace_event("vision_agent_error", error=str(e), error_type=type(e).__name__)
+            print(f"❌ Vision agent error: {str(e)}")
+            # Fallback to regular agent if vision fails
+            return run_agent_with_code_capture(message)
 
 def run_agent_with_slide_context(message):
     """
