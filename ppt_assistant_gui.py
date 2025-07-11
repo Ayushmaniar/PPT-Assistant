@@ -21,6 +21,8 @@ class PPTAssistant:
         self.root.title("PPT Assistant Chat UI")
         self.ppt_app = None
         self.presentation = None
+        self.vision_enabled = False  # Toggle state for vision feature
+        self.slide_visualizer = None  # Will be initialized when needed
         self.setup_ui()
 
     def setup_ui(self):
@@ -140,9 +142,13 @@ class PPTAssistant:
         code_header = tk.Frame(self.code_frame, bg=self.card_bg)
         code_header.pack(fill=tk.X, padx=15, pady=15)
         
-        # Modern toggle button with icon
+        # Container for toggle buttons (left side)
+        toggles_frame = tk.Frame(code_header, bg=self.card_bg)
+        toggles_frame.pack(anchor='w', fill=tk.X)
+        
+        # Modern toggle button with icon for code display
         self.code_toggle_btn = tk.Button(
-            code_header, 
+            toggles_frame, 
             text="▶ Generated Code", 
             command=self.toggle_code_display, 
             bg=self.sys_msg_bg, 
@@ -156,7 +162,25 @@ class PPTAssistant:
             activebackground=self.border_color,
             activeforeground=self.sys_msg_fg
         )
-        self.code_toggle_btn.pack(anchor='w')
+        self.code_toggle_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Vision toggle button
+        self.vision_toggle_btn = tk.Button(
+            toggles_frame,
+            text="📷 Vision: OFF",
+            command=self.toggle_vision_mode,
+            bg="#374151",  # Darker gray when off
+            fg=self.sys_msg_fg,
+            font=("Segoe UI", 10, "bold"),
+            bd=0,
+            padx=20,
+            pady=8,
+            cursor="hand2",
+            relief="flat",
+            activebackground=self.border_color,
+            activeforeground=self.sys_msg_fg
+        )
+        self.vision_toggle_btn.pack(side=tk.LEFT)
         
         # Code display area with syntax highlighting
         self.code_display = scrolledtext.ScrolledText(
@@ -540,11 +564,77 @@ class PPTAssistant:
                 elif "Generated Code" in widget.cget("text"):
                     widget.bind("<Enter>", lambda e, w=widget: w.config(bg=self.border_color))
                     widget.bind("<Leave>", lambda e, w=widget: w.config(bg=self.sys_msg_bg))
+                elif "Vision:" in widget.cget("text"):
+                    # Special handling for vision toggle - preserve the on/off state colors
+                    def on_vision_enter(e, w=widget):
+                        current_bg = w.cget("bg")
+                        if current_bg == "#059669":  # Green (ON state)
+                            w.config(bg="#047857")  # Darker green on hover
+                        else:  # OFF state
+                            w.config(bg=self.border_color)
+                    
+                    def on_vision_leave(e, w=widget):
+                        if self.vision_enabled:
+                            w.config(bg="#059669")  # Green when on
+                        else:
+                            w.config(bg="#374151")  # Dark gray when off
+                    
+                    widget.bind("<Enter>", on_vision_enter)
+                    widget.bind("<Leave>", on_vision_leave)
                 else:
                     widget.bind("<Enter>", lambda e, w=widget: w.config(bg=self.border_color))
                     widget.bind("<Leave>", lambda e, w=widget: w.config(bg=self.sys_msg_bg))
             elif isinstance(widget, tk.Frame):
                 self._add_hover_to_frame(widget)
+
+    def toggle_vision_mode(self):
+        """Toggle the vision mode on/off with visual feedback."""
+        self.vision_enabled = not self.vision_enabled
+        
+        if self.vision_enabled:
+            # Vision mode ON
+            self.vision_toggle_btn.config(
+                text="📷 Vision: ON",
+                bg="#059669",  # Green when on
+                activebackground="#047857"
+            )
+            self.log("[System] 📷 Vision mode enabled - slide screenshots with object annotations will be sent to AI")
+        else:
+            # Vision mode OFF
+            self.vision_toggle_btn.config(
+                text="📷 Vision: OFF", 
+                bg="#374151",  # Dark gray when off
+                activebackground=self.border_color
+            )
+            self.log("[System] 📷 Vision mode disabled - text-only mode")
+
+    def get_slide_visualizer(self):
+        """Get or create the slide visualizer instance."""
+        if self.slide_visualizer is None:
+            try:
+                # Import the SlideVisualizer
+                from slide_visualizer import SlideVisualizer
+                self.slide_visualizer = SlideVisualizer()
+                return self.slide_visualizer
+            except Exception as e:
+                self.log(f"[System] ❌ Failed to initialize slide visualizer: {e}")
+                return None
+        return self.slide_visualizer
+
+    def get_slide_image_for_vision(self):
+        """Get the current slide as a PIL Image for vision processing."""
+        try:
+            visualizer = self.get_slide_visualizer()
+            if visualizer is None:
+                return None
+            
+            # Get annotated slide as PIL Image (with bounding boxes and IDs)
+            pil_image = visualizer.get_annotated_slide_as_pil_image(target_width=512)
+            return pil_image
+            
+        except Exception as e:
+            self.log(f"[System] ⚠️ Could not capture slide image: {e}")
+            return None
 
     def toggle_code_display(self):
         """Toggle the visibility of the code display area with smooth animation."""
@@ -1226,10 +1316,23 @@ modify_text_in_textbox(
         # Use the smolagent to process the message and execute the tool
         try:
             # Show modern processing message
-            self.log("[System] 🔄 Processing your request...")
+            if self.vision_enabled:
+                self.log("[System] 🔄 Processing your request with vision...")
+            else:
+                self.log("[System] 🔄 Processing your request...")
             self.root.update()  # Force UI update
             
-            result = ppt_smolagent.run_agent_with_code_capture(msg)
+            # Get slide image if vision is enabled
+            images = None
+            if self.vision_enabled:
+                slide_image = self.get_slide_image_for_vision()
+                if slide_image:
+                    images = [slide_image]
+                    self.log("[System] 📷 Slide screenshot captured with object annotations for AI analysis")
+                else:
+                    self.log("[System] ⚠️ Vision enabled but could not capture slide - proceeding with text-only")
+            
+            result = ppt_smolagent.run_agent_with_code_capture(msg, images=images)
             
             # Display the final answer with emoji
             self.log(f"[System] ✅ {result['answer']}")

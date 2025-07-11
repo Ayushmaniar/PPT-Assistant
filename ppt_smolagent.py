@@ -29,7 +29,7 @@ if not openai_api_key:
 
 # Define the model using OpenAIServerModel
 model = OpenAIServerModel(
-    model_id="gpt-4.1",
+    model_id="gpt-4o",
     api_key=openai_api_key,
     api_base = "https://api.openai.com/v1"
 )
@@ -920,6 +920,15 @@ IMPORTANT: You will ALWAYS receive current slide context before user requests. T
 - Object IDs (permanent identifiers for reliable reference)
 - Animations and slide notes
 
+🔍 VISION CAPABILITIES:
+When an image of the slide is provided, you can:
+- See object bounding boxes (green rectangles) with ID labels (yellow "ID:29" tags)
+- Understand spatial relationships and visual layout
+- Make better positioning decisions for new objects
+- Identify visual patterns and alignment
+
+The image provides visual context to enhance your tool usage decisions.
+
 USE THIS CONTEXT in your THOUGHT process to make informed decisions about positioning, styling, and content placement.
 
 📝 TEXT EDITING TOOLS - Choose the RIGHT tool for the task:
@@ -933,17 +942,19 @@ USE THIS CONTEXT in your THOUGHT process to make informed decisions about positi
 
 ⚠️ CRITICAL RULES:
 - ALWAYS use object IDs from slide context for reliable reference
+- When an image is provided, use visual cues to enhance your understanding
 - Choose the most specific tool for each task
 - Consider existing content positioning when adding new elements
 - Match existing fonts/styles when appropriate for consistency
 - **LEVERAGE MULTI-TOOL ACTIONS**: Use multiple tools together when they accomplish related goals efficiently
 
 Remember: Only modify slides when the user specifically requests changes.
+Remember: If the user asks a query, then you need to reply by using the final_answer tool in the code, ALWAYS answer queries using final_answer tool.
 """
 
 # Create a custom logging handler to capture code generation
 class CodeCaptureHandler(logging.Handler):
-    def __init__(self):
+    def __init__(self): 
         super().__init__()
         self.captured_code = []
         
@@ -1030,10 +1041,14 @@ def strip_ansi_codes(text):
     
     return text
 
-def run_agent_with_code_capture(message):
+def run_agent_with_code_capture(message, images=None):
     """
     Run the agent and capture both the final answer and generated code.
     Automatically includes current slide context in the message.
+    
+    Args:
+        message (str): The user's message/request
+        images (list[PIL.Image.Image], optional): List of PIL Image objects to pass to the agent
     
     Returns:
         dict: Contains 'answer', 'generated_code', and 'slide_context' keys
@@ -1053,8 +1068,21 @@ def run_agent_with_code_capture(message):
                 if slide_line:
                     print(f"🎯 Current slide context: {slide_line[0]}")
             
-            # Enhance the message with slide context
-            enhanced_message = f"""CURRENT SLIDE CONTEXT:
+            # Handle message construction differently based on whether images are provided
+            if images:
+                # When images are provided, enhance the prompt but keep it focused on tool usage
+                enhanced_message = f"""CURRENT SLIDE CONTEXT:
+{slide_context}
+
+VISUAL INFORMATION: You can see the current slide image which shows the visual layout with green bounding boxes around objects and yellow ID labels (e.g., "ID:29"). Use this visual information along with the slide context data to make informed decisions about object positioning and modifications.
+
+USER REQUEST:
+{message}
+
+Note: Focus on using the available PowerPoint tools to fulfill the user's request. The visual information helps you understand the current layout."""
+            else:
+                # When no images, use the original approach
+                enhanced_message = f"""CURRENT SLIDE CONTEXT:
 {slide_context}
 
 USER REQUEST:
@@ -1081,7 +1109,11 @@ USER REQUEST:
                 
                 # Run the agent with enhanced message
                 add_trace_event("agent_execution", action="running_smolagent", enhanced_message_length=len(enhanced_message))
-                answer = agent.run(enhanced_message)
+                if images:
+                    add_trace_event("agent_with_images", num_images=len(images))
+                    answer = agent.run(enhanced_message, images=images)
+                else:
+                    answer = agent.run(enhanced_message)
                 add_trace_event("agent_response", answer_length=len(answer) if answer else 0)
                 
             finally:

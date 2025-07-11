@@ -5,6 +5,7 @@ import numpy as np
 import os
 from slide_context_reader import PowerPointSlideReader
 import time
+from PIL import Image, ImageDraw, ImageFont
 
 class SlideVisualizer:
     def __init__(self):
@@ -286,6 +287,198 @@ class SlideVisualizer:
         # Mark the extreme end value for Y-axis
         end_y_py = int(self.slide_height_points * scale_y) + border
         draw_tick(end_y_py, str(int(self.slide_height_points)), is_major=True, is_x_axis=False)
+
+    def get_slide_as_pil_image(self, target_width=512, file_format="PNG"):
+        """
+        Get the current slide as a PIL Image object for use with AI models.
+        
+        Args:
+            target_width (int): Target width for the exported image (height will be calculated to maintain aspect ratio)
+            file_format (str): Export format, either "PNG" or "JPG"
+        
+        Returns:
+            PIL.Image.Image: The slide image as a PIL Image object, or None if export fails
+        """
+        try:
+            # Get slide data and index
+            slide_index = self.reader.get_current_slide_index()
+            if not slide_index:
+                print("❌ Could not get current slide index.")
+                return None
+            
+            slide = self.presentation.Slides(slide_index)
+            
+            # Calculate export dimensions to maintain aspect ratio
+            export_width, export_height = self._get_slide_export_dimensions(target_width)
+            
+            # Export slide to temporary file (consistent filename for vision mode)
+            temp_file_path = os.path.abspath(f"temp_slide_image.{file_format.lower()}")
+            slide.Export(temp_file_path, file_format, export_width, export_height)
+            
+            # Add a small delay to ensure file is fully written
+            import time
+            time.sleep(0.1)
+            
+            # Load the image with PIL
+            pil_image = Image.open(temp_file_path)
+            
+            # Convert to RGB if necessary (in case of RGBA or other formats)
+            if pil_image.mode != 'RGB':
+                pil_image = pil_image.convert('RGB')
+            
+            # Clean up the temporary file with retry mechanism
+            max_retries = 5
+            for i in range(max_retries):
+                try:
+                    os.remove(temp_file_path)
+                    break
+                except (PermissionError, OSError) as e:
+                    if i < max_retries - 1:
+                        time.sleep(0.1)  # Wait a bit longer between retries
+                    else:
+                        print(f"⚠️ Warning: Could not delete temp file {temp_file_path}: {e}")
+            
+            print(f"✅ Successfully exported slide as PIL Image ({export_width}x{export_height})")
+            return pil_image
+            
+        except Exception as e:
+            print(f"❌ Error exporting slide as PIL Image: {e}")
+            # Clean up temp file if it exists
+            try:
+                if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+                    import time
+                    time.sleep(0.1)
+                    os.remove(temp_file_path)
+            except:
+                pass
+            return None
+
+    def get_annotated_slide_as_pil_image(self, target_width=512, file_format="PNG"):
+        """
+        Get the current slide as a PIL Image with object annotations (bounding boxes and IDs).
+        This is the annotated version for AI vision - shows object IDs and boundaries.
+        
+        Args:
+            target_width (int): Target width for the exported image
+            file_format (str): Export format, either "PNG" or "JPG"
+        
+        Returns:
+            PIL.Image.Image: The annotated slide image as a PIL Image object, or None if export fails
+        """
+        try:
+            # Get slide data and index
+            slide_index = self.reader.get_current_slide_index()
+            if not slide_index:
+                print("❌ Could not get current slide index.")
+                return None
+            
+            slide = self.presentation.Slides(slide_index)
+            slide_info = self.reader.read_slide_content_lean(slide_index)
+            
+            # Calculate export dimensions to maintain aspect ratio
+            export_width, export_height = self._get_slide_export_dimensions(target_width)
+            
+            # Export slide to temporary file (consistent filename for vision mode)
+            temp_file_path = os.path.abspath(f"temp_slide_annotated.{file_format.lower()}")
+            slide.Export(temp_file_path, file_format, export_width, export_height)
+            
+            # Add a small delay to ensure file is fully written
+            import time
+            time.sleep(0.1)
+            
+            # Load the image with PIL
+            pil_image = Image.open(temp_file_path)
+            
+            # Convert to RGB if necessary
+            if pil_image.mode != 'RGB':
+                pil_image = pil_image.convert('RGB')
+            
+            # Add annotations using PIL ImageDraw
+            from PIL import ImageDraw, ImageFont
+            draw = ImageDraw.Draw(pil_image)
+            
+            # Calculate scaling factors
+            scale_x = export_width / self.slide_width_points
+            scale_y = export_height / self.slide_height_points
+            
+            # Try to load a font, fallback to default if not available
+            try:
+                font_size = max(12, int(target_width / 80))  # Dynamic font size
+                font = ImageFont.truetype("arial.ttf", font_size)
+            except:
+                font = ImageFont.load_default()
+            
+            # Define colors (RGB format for PIL)
+            box_color = (0, 255, 0)  # Green
+            label_bg_color = (255, 255, 0)  # Yellow
+            label_text_color = (0, 0, 0)  # Black
+            
+            # Draw annotations for each shape
+            for shape in slide_info.get('shapes', []):
+                static_id = shape.get('static_id')
+                if static_id is None:
+                    continue
+                
+                # Scale coordinates
+                x = int(shape.get('left', 0) * scale_x)
+                y = int(shape.get('top', 0) * scale_y)
+                w = int(shape.get('width', 0) * scale_x)
+                h = int(shape.get('height', 0) * scale_y)
+                
+                # Draw bounding box
+                draw.rectangle([x, y, x + w, y + h], outline=box_color, width=2)
+                
+                # Draw ID label
+                id_text = f"ID:{static_id}"
+                
+                # Get text size
+                try:
+                    bbox = draw.textbbox((0, 0), id_text, font=font)
+                    text_width = bbox[2] - bbox[0]
+                    text_height = bbox[3] - bbox[1]
+                except:
+                    # Fallback for older PIL versions
+                    text_width, text_height = draw.textsize(id_text, font=font)
+                
+                # Position the label
+                text_x = x
+                text_y = y - text_height - 5
+                if text_y < 0:  # If label would be above image, place it below the box
+                    text_y = y + h + 5
+                
+                # Draw label background
+                draw.rectangle([text_x, text_y, text_x + text_width + 4, text_y + text_height + 2], 
+                             fill=label_bg_color)
+                
+                # Draw label text
+                draw.text((text_x + 2, text_y + 1), id_text, fill=label_text_color, font=font)
+            
+            # Clean up the temporary file with retry mechanism
+            max_retries = 5
+            for i in range(max_retries):
+                try:
+                    os.remove(temp_file_path)
+                    break
+                except (PermissionError, OSError) as e:
+                    if i < max_retries - 1:
+                        time.sleep(0.1)
+                    else:
+                        print(f"⚠️ Warning: Could not delete temp file {temp_file_path}: {e}")
+            
+            print(f"✅ Successfully created annotated PIL Image ({export_width}x{export_height}) with {len(slide_info.get('shapes', []))} annotations")
+            return pil_image
+            
+        except Exception as e:
+            print(f"❌ Error creating annotated PIL Image: {e}")
+            # Clean up temp file if it exists
+            try:
+                if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+                    import time
+                    time.sleep(0.1)
+                    os.remove(temp_file_path)
+            except:
+                pass
+            return None
 
 def test_visualizer():
     """
