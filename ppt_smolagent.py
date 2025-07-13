@@ -1044,6 +1044,28 @@ def strip_ansi_codes(text):
 def run_agent_with_code_capture(message, images=None):
     """
     Run the agent and capture both the final answer and generated code.
+    This function now routes to the new multi-agent system for enhanced capabilities.
+    
+    Args:
+        message (str): The user's message/request
+        images (list[PIL.Image.Image], optional): Legacy parameter (handled automatically by multi-agent system)
+    
+    Returns:
+        dict: Contains 'answer', 'generated_code', and 'slide_context' keys
+    """
+    # Import the new multi-agent system
+    try:
+        from multiagent_ppt_system import run_multiagent_request
+        print("🤖 Using new multi-agent PowerPoint system...")
+        return run_multiagent_request(message)
+    except ImportError:
+        print("⚠️ Multi-agent system not available, falling back to legacy single-agent...")
+        # Fallback to legacy system if multi-agent is not available
+        return _legacy_run_agent_with_code_capture(message, images)
+
+def _legacy_run_agent_with_code_capture(message, images=None):
+    """
+    Legacy single-agent implementation for backwards compatibility.
     Automatically includes current slide context in the message.
     
     Args:

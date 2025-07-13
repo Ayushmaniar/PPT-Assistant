@@ -22,6 +22,12 @@ class SlideVisualizer:
 
     def _get_slide_export_dimensions(self, image_width):
         """Calculates the export height based on a given width to maintain aspect ratio."""
+        # Prevent division by zero if slide dimensions are invalid
+        if self.slide_width_points <= 0 or self.slide_height_points <= 0:
+            print(f"⚠️ Invalid slide dimensions for aspect ratio: {self.slide_width_points}x{self.slide_height_points}")
+            # Return default 16:9 aspect ratio dimensions
+            return image_width, int(image_width * 9 / 16)
+        
         aspect_ratio = self.slide_height_points / self.slide_width_points
         image_height = int(image_width * aspect_ratio)
         return image_width, image_height
@@ -55,9 +61,9 @@ class SlideVisualizer:
             downsampled_image = cv2.resize(image, (target_width, target_height), interpolation=cv2.INTER_AREA)
             
             # 4. Draw overlays onto the downsampled image
-            # Recalculate scale factors for the new, smaller dimensions
-            scale_x = downsampled_image.shape[1] / self.slide_width_points
-            scale_y = downsampled_image.shape[0] / self.slide_height_points
+            # Recalculate scale factors for the new, smaller dimensions with division by zero protection
+            scale_x = downsampled_image.shape[1] / max(1, self.slide_width_points)
+            scale_y = downsampled_image.shape[0] / max(1, self.slide_height_points)
             
             box_color = (0, 255, 0)
             label_bg_color = (0, 255, 255)
@@ -90,8 +96,8 @@ class SlideVisualizer:
                 cv2.rectangle(downsampled_image, (text_x, text_y - th - 2), (text_x + tw + 2, text_y + 2), label_bg_color, -1)
                 cv2.putText(downsampled_image, id_text, (text_x + 1, text_y), font, font_scale, label_text_color, font_thickness, cv2.LINE_AA)
 
-            # 5. Clean up the temporary file
-            os.remove(temp_file_path)
+            # 5. Keep the temporary file (it will be overwritten on next call)
+            print(f"📁 Temporary file kept at: {temp_file_path}")
 
             print(f"✅ Successfully created downsampled image with overlays of size {downsampled_image.shape[1]}x{downsampled_image.shape[0]}.")
             return downsampled_image
@@ -155,9 +161,9 @@ class SlideVisualizer:
         # Paste the slide image onto the canvas
         canvas[border_size : border_size + img_height, border_size : border_size + img_width] = slide_image
         
-        # 5. Calculate scaling factors
-        scale_x = img_width / self.slide_width_points
-        scale_y = img_height / self.slide_height_points
+        # 5. Calculate scaling factors with division by zero protection
+        scale_x = img_width / max(1, self.slide_width_points)
+        scale_y = img_height / max(1, self.slide_height_points)
 
         # 6. Draw rulers on the canvas
         self._draw_rulers(canvas, border_size, img_width, img_height, scale_x, scale_y)
@@ -216,8 +222,8 @@ class SlideVisualizer:
         cv2.imwrite(output_path, canvas)
         t_save_end = time.time()
 
-        # 9. Clean up temporary file
-        os.remove(temp_png_path)
+        # 9. Keep temporary file (it will be overwritten on next call)
+        print(f"📁 Temporary file kept at: {temp_png_path}")
         
         t_end = time.time()
 
@@ -248,6 +254,15 @@ class SlideVisualizer:
             scale_y (float): The scale factor for the y-axis (pixels per point).
             tick_interval (int): The interval for ruler ticks in points.
         """
+        # Ensure tick_interval is not zero to prevent modulo by zero error
+        if tick_interval <= 0:
+            tick_interval = 25  # Default fallback value
+        
+        # Validate slide dimensions to prevent division by zero
+        if self.slide_width_points <= 0 or self.slide_height_points <= 0:
+            print(f"⚠️ Invalid slide dimensions: {self.slide_width_points}x{self.slide_height_points}")
+            return  # Skip drawing rulers if dimensions are invalid
+            
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 0.4
         font_thickness = 1
@@ -270,9 +285,14 @@ class SlideVisualizer:
 
         # --- X-axis Ruler (Top) ---
         cv2.line(canvas, (border, border), (border + width, border), (0,0,0), 1)
-        for i in range(0, int(self.slide_width_points), tick_interval):
+        
+        # Safely iterate through X-axis ticks
+        slide_width_int = max(1, int(self.slide_width_points))  # Ensure minimum of 1
+        for i in range(0, slide_width_int, tick_interval):
             px = int(i * scale_x) + border
-            is_major_tick = (i % (tick_interval * 2) == 0) # Make every other tick major
+            # Ensure we don't divide by zero in modulo operation
+            major_interval = max(1, tick_interval * 2)
+            is_major_tick = (i % major_interval == 0) # Make every other tick major
             draw_tick(px, str(i), is_major=is_major_tick, is_x_axis=True)
         # Mark the extreme end value for X-axis
         end_x_px = int(self.slide_width_points * scale_x) + border
@@ -280,9 +300,14 @@ class SlideVisualizer:
 
         # --- Y-axis Ruler (Left) ---
         cv2.line(canvas, (border, border), (border, border + height), (0,0,0), 1)
-        for i in range(0, int(self.slide_height_points), tick_interval):
+        
+        # Safely iterate through Y-axis ticks
+        slide_height_int = max(1, int(self.slide_height_points))  # Ensure minimum of 1
+        for i in range(0, slide_height_int, tick_interval):
             py = int(i * scale_y) + border
-            is_major_tick = (i % (tick_interval * 2) == 0) # Make every other tick major
+            # Ensure we don't divide by zero in modulo operation
+            major_interval = max(1, tick_interval * 2)
+            is_major_tick = (i % major_interval == 0) # Make every other tick major
             draw_tick(py, str(i), is_major=is_major_tick, is_x_axis=False)
         # Mark the extreme end value for Y-axis
         end_y_py = int(self.slide_height_points * scale_y) + border
@@ -326,31 +351,14 @@ class SlideVisualizer:
             if pil_image.mode != 'RGB':
                 pil_image = pil_image.convert('RGB')
             
-            # Clean up the temporary file with retry mechanism
-            max_retries = 5
-            for i in range(max_retries):
-                try:
-                    os.remove(temp_file_path)
-                    break
-                except (PermissionError, OSError) as e:
-                    if i < max_retries - 1:
-                        time.sleep(0.1)  # Wait a bit longer between retries
-                    else:
-                        print(f"⚠️ Warning: Could not delete temp file {temp_file_path}: {e}")
+            # Keep the temporary file (it will be overwritten on next call)
+            print(f"📁 Temporary file kept at: {temp_file_path}")
             
             print(f"✅ Successfully exported slide as PIL Image ({export_width}x{export_height})")
             return pil_image
             
         except Exception as e:
             print(f"❌ Error exporting slide as PIL Image: {e}")
-            # Clean up temp file if it exists
-            try:
-                if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-                    import time
-                    time.sleep(0.1)
-                    os.remove(temp_file_path)
-            except:
-                pass
             return None
 
     def get_annotated_slide_as_pil_image(self, target_width=512, file_format="PNG"):
@@ -397,9 +405,9 @@ class SlideVisualizer:
             from PIL import ImageDraw, ImageFont
             draw = ImageDraw.Draw(pil_image)
             
-            # Calculate scaling factors
-            scale_x = export_width / self.slide_width_points
-            scale_y = export_height / self.slide_height_points
+            # Calculate scaling factors with division by zero protection
+            scale_x = export_width / max(1, self.slide_width_points)
+            scale_y = export_height / max(1, self.slide_height_points)
             
             # Try to load a font, fallback to default if not available
             try:
@@ -453,31 +461,15 @@ class SlideVisualizer:
                 # Draw label text
                 draw.text((text_x + 2, text_y + 1), id_text, fill=label_text_color, font=font)
             
-            # Clean up the temporary file with retry mechanism
-            max_retries = 5
-            for i in range(max_retries):
-                try:
-                    os.remove(temp_file_path)
-                    break
-                except (PermissionError, OSError) as e:
-                    if i < max_retries - 1:
-                        time.sleep(0.1)
-                    else:
-                        print(f"⚠️ Warning: Could not delete temp file {temp_file_path}: {e}")
+            # Save the annotated PIL Image back to the temp file so the file also contains annotations
+            pil_image.save(temp_file_path, file_format)
+            print(f"📁 Annotated image saved to: {temp_file_path}")
             
             print(f"✅ Successfully created annotated PIL Image ({export_width}x{export_height}) with {len(slide_info.get('shapes', []))} annotations")
             return pil_image
             
         except Exception as e:
             print(f"❌ Error creating annotated PIL Image: {e}")
-            # Clean up temp file if it exists
-            try:
-                if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-                    import time
-                    time.sleep(0.1)
-                    os.remove(temp_file_path)
-            except:
-                pass
             return None
 
 def test_visualizer():

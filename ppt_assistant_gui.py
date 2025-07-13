@@ -7,13 +7,25 @@ import datetime
 import importlib.util
 import sys
 
-# Dynamically import ppt_smolagent.py as ppt_smolagent
+# Import multi-agent system directly
 import win32com.client
 import pythoncom
-spec = importlib.util.spec_from_file_location("ppt_smolagent", "ppt_smolagent.py")
-ppt_smolagent = importlib.util.module_from_spec(spec)
-sys.modules["ppt_smolagent"] = ppt_smolagent
-spec.loader.exec_module(ppt_smolagent)
+from multiagent_ppt_system import (
+    run_agent_with_code_capture,
+    get_current_slide_context,
+    add_textbox,
+    replace_textbox_content,
+    modify_text_in_textbox,
+    add_text_to_textbox,
+    format_textbox_style,
+    move_object,
+    resize_object,
+    position_and_resize_object,
+    get_object_properties,
+    copy_object_to_slide,
+    duplicate_object_on_same_slide,
+    delete_object
+)
 
 class PPTAssistant:
     def __init__(self, root):
@@ -21,7 +33,8 @@ class PPTAssistant:
         self.root.title("PPT Assistant Chat UI")
         self.ppt_app = None
         self.presentation = None
-        self.vision_enabled = False  # Toggle state for vision feature
+        # Note: Vision functionality is now automatic via multi-agent system
+        # self.vision_enabled = False  # Legacy vision toggle removed
         self.slide_visualizer = None  # Will be initialized when needed
         self.setup_ui()
 
@@ -164,23 +177,35 @@ class PPTAssistant:
         )
         self.code_toggle_btn.pack(side=tk.LEFT, padx=(0, 10))
         
-        # Vision toggle button
-        self.vision_toggle_btn = tk.Button(
+        # Vision toggle button - REMOVED: Vision is now automatic via multi-agent system
+        # self.vision_toggle_btn = tk.Button(
+        #     toggles_frame,
+        #     text="📷 Vision: OFF",
+        #     command=self.toggle_vision_mode,
+        #     bg="#374151",  # Darker gray when off
+        #     fg=self.sys_msg_fg,
+        #     font=("Segoe UI", 10, "bold"),
+        #     bd=0,
+        #     padx=20,
+        #     pady=8,
+        #     cursor="hand2",
+        #     relief="flat",
+        #     activebackground=self.border_color,
+        #     activeforeground=self.sys_msg_fg
+        # )
+        # self.vision_toggle_btn.pack(side=tk.LEFT)
+        
+        # Multi-agent system indicator
+        self.multiagent_indicator = tk.Label(
             toggles_frame,
-            text="📷 Vision: OFF",
-            command=self.toggle_vision_mode,
-            bg="#374151",  # Darker gray when off
-            fg=self.sys_msg_fg,
+            text="🤖 Multi-Agent System",
+            bg=self.bg_color,
+            fg="#059669",  # Green to indicate active
             font=("Segoe UI", 10, "bold"),
-            bd=0,
             padx=20,
-            pady=8,
-            cursor="hand2",
-            relief="flat",
-            activebackground=self.border_color,
-            activeforeground=self.sys_msg_fg
+            pady=8
         )
-        self.vision_toggle_btn.pack(side=tk.LEFT)
+        self.multiagent_indicator.pack(side=tk.LEFT)
         
         # Code display area with syntax highlighting
         self.code_display = scrolledtext.ScrolledText(
@@ -564,49 +589,17 @@ class PPTAssistant:
                 elif "Generated Code" in widget.cget("text"):
                     widget.bind("<Enter>", lambda e, w=widget: w.config(bg=self.border_color))
                     widget.bind("<Leave>", lambda e, w=widget: w.config(bg=self.sys_msg_bg))
-                elif "Vision:" in widget.cget("text"):
-                    # Special handling for vision toggle - preserve the on/off state colors
-                    def on_vision_enter(e, w=widget):
-                        current_bg = w.cget("bg")
-                        if current_bg == "#059669":  # Green (ON state)
-                            w.config(bg="#047857")  # Darker green on hover
-                        else:  # OFF state
-                            w.config(bg=self.border_color)
-                    
-                    def on_vision_leave(e, w=widget):
-                        if self.vision_enabled:
-                            w.config(bg="#059669")  # Green when on
-                        else:
-                            w.config(bg="#374151")  # Dark gray when off
-                    
-                    widget.bind("<Enter>", on_vision_enter)
-                    widget.bind("<Leave>", on_vision_leave)
+                # Vision toggle hover effects removed - vision is now automatic
                 else:
                     widget.bind("<Enter>", lambda e, w=widget: w.config(bg=self.border_color))
                     widget.bind("<Leave>", lambda e, w=widget: w.config(bg=self.sys_msg_bg))
             elif isinstance(widget, tk.Frame):
                 self._add_hover_to_frame(widget)
 
-    def toggle_vision_mode(self):
-        """Toggle the vision mode on/off with visual feedback."""
-        self.vision_enabled = not self.vision_enabled
-        
-        if self.vision_enabled:
-            # Vision mode ON
-            self.vision_toggle_btn.config(
-                text="📷 Vision: ON",
-                bg="#059669",  # Green when on
-                activebackground="#047857"
-            )
-            self.log("[System] 📷 Vision mode enabled - slide screenshots with object annotations will be sent to AI")
-        else:
-            # Vision mode OFF
-            self.vision_toggle_btn.config(
-                text="📷 Vision: OFF", 
-                bg="#374151",  # Dark gray when off
-                activebackground=self.border_color
-            )
-            self.log("[System] 📷 Vision mode disabled - text-only mode")
+    # Vision toggle method removed - vision is now automatic via multi-agent system
+    # def toggle_vision_mode(self):
+    #     """Toggle the vision mode on/off with visual feedback."""
+    #     pass
 
     def get_slide_visualizer(self):
         """Get or create the slide visualizer instance."""
@@ -943,7 +936,7 @@ modify_text_in_textbox(
             self.root.update()  # Force UI update to show loading message
             
             # Get slide context using the agent's context reader with force refresh
-            context = ppt_smolagent.get_current_slide_context(force_refresh=True)
+            context = get_current_slide_context(force_refresh=True)
             
             # Clear and update the display
             self.context_display.delete(1.0, tk.END)
@@ -1005,7 +998,7 @@ modify_text_in_textbox(
                 return
             
             # Get slide context using the agent's context reader
-            context = ppt_smolagent.get_current_slide_context()
+            context = get_current_slide_context()
             
             self.debug_output.delete(1.0, tk.END)
             self.debug_output.insert(tk.END, "📋 Current Slide Context:\n")
@@ -1041,28 +1034,21 @@ modify_text_in_textbox(
             self.debug_output.insert(tk.END, "="*50 + "\n")
             self.root.update()  # Force UI update
             
-            # Import the tools into the execution namespace
-            import ppt_smolagent
-            
             # Create execution namespace with all the tools
             exec_namespace = {
                 # New improved tools
-                'add_textbox': ppt_smolagent.add_textbox,
-                'replace_textbox_content': ppt_smolagent.replace_textbox_content,
-                'modify_text_in_textbox': ppt_smolagent.modify_text_in_textbox,
-                'add_text_to_textbox': ppt_smolagent.add_text_to_textbox,
-                'format_textbox_style': ppt_smolagent.format_textbox_style,
-                'move_object': ppt_smolagent.move_object,
-                'resize_object': ppt_smolagent.resize_object,
-                'position_and_resize_object': ppt_smolagent.position_and_resize_object,
-                'get_object_properties': ppt_smolagent.get_object_properties,
-                'copy_object_to_slide': ppt_smolagent.copy_object_to_slide,
-                'duplicate_object_on_same_slide': ppt_smolagent.duplicate_object_on_same_slide,
-                'delete_object': ppt_smolagent.delete_object,
-                # Legacy tools for backward compatibility (if they still exist)
-                'update_textbox': getattr(ppt_smolagent, 'update_textbox', None),
-                'format_text_pattern': getattr(ppt_smolagent, 'format_text_pattern', None),
-                'duplicate_object': getattr(ppt_smolagent, 'duplicate_object', None),
+                'add_textbox': add_textbox,
+                'replace_textbox_content': replace_textbox_content,
+                'modify_text_in_textbox': modify_text_in_textbox,
+                'add_text_to_textbox': add_text_to_textbox,
+                'format_textbox_style': format_textbox_style,
+                'move_object': move_object,
+                'resize_object': resize_object,
+                'position_and_resize_object': position_and_resize_object,
+                'get_object_properties': get_object_properties,
+                'copy_object_to_slide': copy_object_to_slide,
+                'duplicate_object_on_same_slide': duplicate_object_on_same_slide,
+                'delete_object': delete_object,
                 # Utility functions
                 'print': lambda *args: self.debug_print(*args)
             }
@@ -1316,23 +1302,11 @@ modify_text_in_textbox(
         # Use the smolagent to process the message and execute the tool
         try:
             # Show modern processing message
-            if self.vision_enabled:
-                self.log("[System] 🔄 Processing your request with vision...")
-            else:
-                self.log("[System] 🔄 Processing your request...")
+            self.log("[System] 🤖 Processing your request with multi-agent system...")
             self.root.update()  # Force UI update
             
-            # Get slide image if vision is enabled
-            images = None
-            if self.vision_enabled:
-                slide_image = self.get_slide_image_for_vision()
-                if slide_image:
-                    images = [slide_image]
-                    self.log("[System] 📷 Slide screenshot captured with object annotations for AI analysis")
-                else:
-                    self.log("[System] ⚠️ Vision enabled but could not capture slide - proceeding with text-only")
-            
-            result = ppt_smolagent.run_agent_with_code_capture(msg, images=images)
+            # The multi-agent system handles vision automatically - no need for manual image capture
+            result = run_agent_with_code_capture(msg)
             
             # Display the final answer with emoji
             self.log(f"[System] ✅ {result['answer']}")
@@ -1342,7 +1316,7 @@ modify_text_in_textbox(
             
             # Show code toggle button with modern indicator
             if result['generated_code'] and "Error occurred" not in result['generated_code']:
-                self.code_toggle_btn.config(text="▶ Generated Code �")  # Green indicator for new code
+                self.code_toggle_btn.config(text="▶ Generated Code 🟢")  # Green indicator for new code
                 # If code area is currently visible, update the button text accordingly
                 if self.code_display_visible:
                     self.code_toggle_btn.config(text="▼ Generated Code")
