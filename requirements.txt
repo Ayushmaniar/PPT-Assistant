@@ -1,8 +1,9 @@
 pywin32
 smolagents[toolkit]
 smolagents[openai]
+smolagents[litellm]
 huggingface_hub
-win32com
+# win32com
 python-dotenv
 opencv-python
 numpy
