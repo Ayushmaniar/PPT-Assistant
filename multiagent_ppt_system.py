@@ -36,7 +36,7 @@ if not openai_api_key:
 
 # Define the models - all using GPT-4o as requested
 manager_model = OpenAIServerModel(
-    model_id="gpt-4.1",
+    model_id="gpt-4.1-nano",
     api_key=openai_api_key,
     api_base="https://api.openai.com/v1"
 )
@@ -344,17 +344,66 @@ def replace_textbox_content(id: int, html_text: str, slide_idx: int = 1, font_si
 @tool
 def modify_text_in_textbox(id: int, find_pattern: str, replacement_text: str, slide_idx: int = 1, regex_flags: str = "IGNORECASE") -> str:
     """
-    Find and replace specific text patterns within a textbox while preserving all other text.
+    Find and replace specific text patterns within a textbox while preserving other text.
     
-    This tool modifies only the matching text and keeps everything else unchanged.
-    Perfect for tasks like "make 'Company Name' bold" or "change all dates to red".
+    WHEN TO USE: Format specific words/phrases, resize specific text (titles, headers), update patterns like dates/emails, delete text
+    DON'T USE FOR: Complete text replacement (use replace_textbox_content), adding text (use add_text_to_textbox), formatting entire textbox uniformly (use format_textbox_style)
+    
+    **SELECTIVE SIZING**: Use this tool to make titles/headers bigger while keeping body text unchanged.
+    **GLOBAL SIZING**: Use format_textbox_style only if the entire textbox should have the same size.
+    
+    EXAMPLES:
+    
+    # Make titles/headers bigger (SELECTIVE sizing - most common use case)
+    modify_text_in_textbox(id=12, find_pattern=r"^.*?(?=\n|$)", replacement_text="<span style='font-size: 24px'><b>\\\\g<0></b></span>", regex_flags="MULTILINE")  # First line bigger
+    modify_text_in_textbox(id=34, find_pattern="Project Overview", replacement_text="<span style='font-size: 20px'><b>Project Overview</b></span>")  # Specific title bigger
+    
+    # Make text bold/colored
+    modify_text_in_textbox(id=23, find_pattern="Company Name", replacement_text="<b>Company Name</b>")
+    modify_text_in_textbox(id=15, find_pattern="IMPORTANT", replacement_text="<span style='color: red; font-size: 18px'><b>IMPORTANT</b></span>")
+    
+    # Format patterns with regex
+    modify_text_in_textbox(id=12, find_pattern=r"\\d{1,2}/\\d{1,2}/\\d{4}", replacement_text="<span style='color: blue'>\\\\g<0></span>")  # Dates
+    modify_text_in_textbox(id=34, find_pattern=r"\\$\\d+\\.\\d{2}", replacement_text="<b style='color: green'>\\\\g<0></b>")  # Prices
+    modify_text_in_textbox(id=56, find_pattern=r"\\b\\w+@\\w+\\.\\w+\\b", replacement_text="<u>\\\\g<0></u>")  # Emails
+    
+    # Headers and special formatting
+    modify_text_in_textbox(id=78, find_pattern=r"^(\\w+:)", replacement_text="<span style='font-size: 16px'><b>\\\\g<1></b></span>", regex_flags="MULTILINE")
+    
+    # Make title text bigger (increase any existing title to 32px)
+    modify_text_in_textbox(id=12, find_pattern=r".*", replacement_text="<span style='font-size: 32px'><b>\\\\g<0></b></span>", regex_flags="DOTALL")
+    
+    # Delete text
+    modify_text_in_textbox(id=90, find_pattern="CONFIDENTIAL", replacement_text="")
+    
+    COMMON REGEX PATTERNS:
+    - r"\\d{4}" → 4-digit years
+    - r"\\b[A-Z]{2,}\\b" → ALL CAPS words  
+    - r"\\(\\d{3}\\)\\s*\\d{3}-\\d{4}" → Phone numbers
+    
+    REGEX FLAGS: "IGNORECASE" (default), "MULTILINE", "DOTALL", combine with "|"
+    HTML FORMATTING: <b>bold</b>, <i>italic</i>, <u>underline</u>, <span style='color: red'>colored</span>, <span style='font-size: 20px'>sized</span>
+    
+    PRESERVE MATCH EXPLAINED:
+    Use \\\\g<0> to keep original text within new formatting - this is CRITICAL for dynamic content.
+    
+    WHY PRESERVE MATCH MATTERS:
+    - You often don't know the exact text content (dates, names, prices, etc.)
+    - \\\\g<0> captures whatever the regex matched and wraps it in your formatting
+    - Without this, you'd need to know specific values like "12/25/2024" or "$99.99"
+    - With this, you can format ANY date or price pattern universally
+    
+    PRESERVE MATCH EXAMPLES:
+    ❌ BAD: replacement_text="<b>December 25, 2024</b>"  # Only works for this specific date
+    ✅ GOOD: replacement_text="<b>\\\\g<0></b>"  # Works for ANY date the regex finds
+    
+    ❌ BAD: replacement_text="<span style='color: red'>$99.99</span>"  # Only this price
+    ✅ GOOD: replacement_text="<span style='color: red'>\\\\g<0></span>"  # ANY price
     
     Args:
         id: The ID of the textbox to modify
-        find_pattern: Text pattern to find (can be plain text or regex)
-        replacement_text: HTML-formatted text to replace matches with.
-            Use HTML syntax like "<b>bold</b>", "<i>italic</i>", "<span style='color: red'>text</span>" etc.
-            Set to empty string ("") to delete the matched text.
+        find_pattern: Text pattern to find (plain text or regex)
+        replacement_text: HTML-formatted replacement text (use "" to delete)
         slide_idx: The slide number (1-indexed) containing the textbox (default: 1)
         regex_flags: Regex flags like "IGNORECASE" (default: "IGNORECASE")
     
@@ -398,17 +447,26 @@ def format_textbox_style(id: int, slide_idx: int = 1, font_size: Optional[int] =
                         line_spacing: Optional[float] = None, left_margin: Optional[float] = None, right_margin: Optional[float] = None, 
                         top_margin: Optional[float] = None, bottom_margin: Optional[float] = None) -> str:
     """
-    Change the formatting and layout properties of a textbox without modifying text content.
+    Apply GLOBAL formatting to an ENTIRE textbox - affects ALL text uniformly.
     
-    Use this to adjust visual appearance like font, alignment, spacing, and margins.
+    WHEN TO USE: Format entire textbox uniformly (single-purpose textboxes, consistent styling)
+    DON'T USE FOR: Selective formatting (titles, specific words, mixed content) - use modify_text_in_textbox instead
+    
+    WARNING: This changes ALL text in the textbox to the same formatting. 
+    If you need to format only part of the text (like making just the title bigger), use modify_text_in_textbox.
+    
+    EXAMPLES:
+    - Format a single-line header textbox: format_textbox_style(id=12, font_size=24, font_name="Arial", text_align="center")
+    - Adjust margins for bullet points: format_textbox_style(id=34, left_margin=20, line_spacing=1.5)
+    - Change alignment of entire paragraph: format_textbox_style(id=56, text_align="justify")
     
     Args:
         id: The ID of the textbox to format
         slide_idx: The slide number (1-indexed) containing the textbox (default: 1)
-        font_size: Base font size in points
-        font_name: Font name for the text
-        text_align: Text alignment - "left", "center", "right", or "justify"
-        line_spacing: Line spacing multiplier (1.0 = single, 1.5 = 1.5x, etc.)
+        font_size: Base font size in points (applies to ALL text)
+        font_name: Font name for ALL text
+        text_align: Text alignment for ALL paragraphs - "left", "center", "right", or "justify"
+        line_spacing: Line spacing multiplier for ALL text (1.0 = single, 1.5 = 1.5x, etc.)
         left_margin: Left margin in points
         right_margin: Right margin in points
         top_margin: Top margin in points
@@ -917,16 +975,19 @@ def _update_textbox_internal(id: int, slide_idx: int = 1, html_text: Optional[st
                     if replacement_text is not None:
                         # Check if replacement contains HTML formatting
                         if any(marker in replacement_text for marker in ['<b>', '<i>', '<u>', '<s>', '<span', '<strong>', '<em>']):
-                            processed_replacement, _ = process_html_lists(replacement_text)
-                            plain_replacement, format_segments = parse_html_text(processed_replacement)
-                            
-                            # Process matches in reverse order to maintain position indices
+                            # HTML formatting with regex replacement - handle each match individually
                             for match in reversed(matches):
                                 match_start = match.start()
                                 match_end = match.end()
                                 match_length = match_end - match_start
+                                matched_text = match.group(0)
                                 
-                                # Replace this specific match in the textbox without affecting the rest
+                                # Process the replacement text with match substitution
+                                processed_replacement = re.sub(regex_finder, replacement_text, matched_text, flags=flags)
+                                processed_replacement, _ = process_html_lists(processed_replacement)
+                                plain_replacement, format_segments = parse_html_text(processed_replacement)
+                                
+                                # Replace this specific match in the textbox
                                 if match_length > 0:
                                     match_range = target_shape.TextFrame.TextRange.Characters(match_start + 1, match_length)
                                     match_range.Text = plain_replacement
@@ -981,7 +1042,7 @@ def _update_textbox_internal(id: int, slide_idx: int = 1, html_text: Optional[st
                                     # Update the current_text to reflect the change for subsequent matches
                                     current_text = target_shape.TextFrame.TextRange.Text
                         else:
-                            # Simple text replacement without HTML formatting
+                            # Simple text replacement without HTML formatting - supports \\g<0> patterns
                             new_text = re.sub(regex_finder, replacement_text, current_text, flags=flags)
                             target_shape.TextFrame.TextRange.Text = new_text
                         
@@ -995,6 +1056,10 @@ def _update_textbox_internal(id: int, slide_idx: int = 1, html_text: Optional[st
         # Apply global font settings that don't conflict with markdown
         if target_shape.TextFrame.HasText:
             text_range = target_shape.TextFrame.TextRange
+            
+            if font_size:
+                text_range.Font.Size = font_size
+                updates_made.append(f"set font size to {font_size} points for entire text")
             
             if font_name:
                 text_range.Font.Name = font_name
@@ -1239,7 +1304,7 @@ print(headline_result)
 **Example 2: Adding Detailed Content with HTML Formatting (with slide verification)**
 <code>
 # Variables for the detailed content textbox
-detail_content = """
+detail_content = '''
 <b>Valorant</b> is a tactical first-person shooter that has captured the hearts of players around the world. Here’s why it’s so cool:
 <ul>
   <li><b>Unique Agents & Abilities:</b> Each agent has special skills, bringing variety and strategy to every match.</li>
@@ -1249,7 +1314,7 @@ detail_content = """
   <li><b>Constant Updates:</b> Riot Games regularly adds new agents, maps, and content, keeping the experience fresh and exciting.</li>
 </ul>
 Valorant is not just another shooter — it’s a thrilling, ever-evolving esport that puts skill, strategy, and creativity front and center.
-"""
+'''
 detail_left = 50  # To ensure there is enough margin on the left
 detail_top = 100  # Below the headline with some spacing
 detail_width = slide_width - 100  # Leaving some margin on both sides for readability
@@ -1360,7 +1425,7 @@ You must follow the systematic 'Thought:', '<code>', and 'Observation:' cycle fo
 
 ### 1. Context Gathering Phase
 Use this pattern for all task initiation:
-```
+<code>
 # Always start with fresh slide context
 print("=== CONTEXT GATHERING PHASE ===")
 current_context = get_current_slide_context_tool()
@@ -1373,20 +1438,20 @@ print("- Slide count: [extract from context]")
 print("- Active slide: [extract from context]") 
 print("- Object count: [extract from context]")
 print("- Key objects: [list main objects with IDs]")
-```
+<\code>
 
 ### 2. Request Analysis Phase
-```
+<code>
 print("=== REQUEST ANALYSIS PHASE ===")
 print("Request Analysis:")
 print("- Request type: [visual/content/mixed]")
 print("- Complexity: [simple/moderate/complex]")
 print("- Required agents: [Vision/Writing/Both]")
 print("- Expected operations: [list anticipated actions]")
-```
+<\code>
 
 ### 3. Vision Agent Coordination (when needed)
-```
+<code>
 print("=== VISION AGENT COORDINATION ===")
 # Get annotated slide image for vision analysis
 print("Preparing visual analysis...")
@@ -1402,12 +1467,12 @@ if slide_image:
     print(vision_feedback)
 else:
     print("ERROR: Failed to capture slide image")
-```
+</code>
 
 ### 4. Writing Agent Coordination (when needed)
 Use this structured instruction format for Writing Agent:
 
-```
+<code>
 print("=== WRITING AGENT COORDINATION ===")
 # Structured instruction format for Writing Agent
 writing_instructions = '''
@@ -1445,10 +1510,10 @@ print(writing_instructions)
 writing_result = writing_agent(task=writing_instructions)
 print("Writing Agent Result:")
 print(writing_result)
-```
+</code>
 
 ### 5. Context Refresh Protocol
-```
+<code>
 print("=== CONTEXT REFRESH PROTOCOL ===")
 # Refresh context after Writing Agent operations
 print("Refreshing slide context after operations...")
@@ -1459,10 +1524,10 @@ print(updated_context)
 # Compare changes
 print("Changes detected:")
 print("- [List specific changes between old and new context]")
-```
+</code>
 
 ### 6. Error Handling Framework
-```
+<code>
 print("=== ERROR HANDLING FRAMEWORK ===")
 # Check for errors in agent outputs
 def validate_agent_output(agent_output, agent_name):
@@ -1478,7 +1543,7 @@ def validate_agent_output(agent_output, agent_name):
 if not validate_agent_output(writing_result, "Writing Agent"):
     print("Attempting retry with modified instructions...")
     # Retry logic here
-```
+</code>
 
 ## TOOL USAGE PATTERNS
 
@@ -1488,21 +1553,21 @@ if not validate_agent_output(writing_result, "Writing Agent"):
 - `get_annotated_slide_image_tool()`: Required before calling Vision Agent
 
 ### Object Inspection Pattern:
-```
+<code>
 # When user references specific objects
 object_details = get_object_properties(object_id)
 print(f"Object {object_id} details:")
 print(f"- Position: ({object_details.get('left', 'N/A')}, {object_details.get('top', 'N/A')})")
 print(f"- Size: {object_details.get('width', 'N/A')}x{object_details.get('height', 'N/A')}")
 print(f"- Type: {object_details.get('type_name', 'N/A')}")
-```
+</code>
 
 ## WORKING CODE EXAMPLES
 
 The following are examples of how to properly coordinate the multi-agent system. These are templates - adapt them to your specific task:
 
 **Example 1: Complete Visual Analysis and Improvement Workflow**
-```
+<code>
 # Step 1: Gather initial context
 print("=== INITIATING VISUAL ANALYSIS WORKFLOW ===")
 current_context = get_current_slide_context_tool()
@@ -1522,10 +1587,10 @@ if slide_image:
     print(vision_feedback)
 else:
     print("ERROR: Failed to capture slide image")
-```
+</code>
 
 **Example 2: Coordinating Writing Agent with Structured Instructions**
-```
+<code>
 # Step 3: Translate vision feedback into actionable Writing Agent task
 writing_task = '''
 TASK CONTEXT:
@@ -1554,10 +1619,10 @@ print("Coordinating Writing Agent with structured instructions...")
 writing_result = writing_agent(task=writing_task)
 print("Writing Agent completed:")
 print(writing_result)
-```
+</code>
 
 **Example 3: Context Refresh and Validation**
-```
+<code>
 # Step 4: Refresh context and validate changes
 print("=== VALIDATING CHANGES ===")
 updated_context = get_current_slide_context_tool()
@@ -1569,7 +1634,7 @@ if validate_agent_output(writing_result, "Writing Agent"):
     print("SUCCESS: All operations completed successfully")
 else:
     print("ERROR: Issues detected - may need retry")
-```
+</code>
 
 **Key Patterns from Examples:**
 - Always use clear phase separation with print statements
