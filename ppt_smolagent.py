@@ -156,91 +156,11 @@ def add_textbox(slide_idx: int = 1, html_text: str = "<b>Sample Text</b>", left:
             add_trace_event("textbox_error", error=str(e), error_type=type(e).__name__)
             return f"Error adding textbox: {str(e)}"
 
-@tool
-def replace_textbox_content(id: int, html_text: str, font_size: int = None, font_name: str = None, text_align: str = None) -> str:
-    """
-    COMPLETELY REPLACE all text content in a textbox with new HTML-formatted text.
-    
-    Use this when you want to completely overwrite the existing text content.
-    All existing text will be deleted and replaced with the new content.
-    
-    HTML Syntax Supported:
-        <b>bold text</b> or <strong>bold text</strong> - Bold formatting
-        <i>italic text</i> or <em>italic text</em> - Italic formatting
-        <s>strikethrough</s> or <del>strikethrough</del> - Strikethrough formatting
-        <u>underlined</u> - Underlined text
-        <span style="color: red">colored text</span> - Colored text (hex #FF0000 or names)
-        <span style="background-color: yellow">highlighted</span> - Background color
-        <ul><li>bullet point</li></ul> - Bullet lists
-        <ol><li>numbered item</li></ol> - Numbered lists
-        <h1>Header 1</h1>, <h2>Header 2</h2>, <h3>Header 3</h3> - Headers
-    
-    Args:
-        id: The ID of the textbox to update
-        html_text: New HTML-formatted text content (replaces ALL existing text)
-        font_size: Base font size in points (headers will be larger)
-        font_name: Font name for the text
-        text_align: Text alignment - "left", "center", "right", or "justify"
-    
-    Returns:
-        str: Confirmation message with details of what was updated
-    """
-    return _update_textbox_internal(
-        id=id,
-        html_text=html_text,
-        text_operation="replace",
-        font_size=font_size,
-        font_name=font_name,
-        text_align=text_align
-    )
+# Tool replace_textbox_content removed (functionality covered by update_textbox with operation="replace")
 
-@tool
-def modify_text_in_textbox(id: int, find_pattern: str, replacement_text: str, regex_flags: str = "IGNORECASE") -> str:
-    """
-    Find and replace specific text patterns within a textbox while preserving all other text.
-    
-    This tool modifies only the matching text and keeps everything else unchanged.
-    Perfect for tasks like "make 'Company Name' bold" or "change all dates to red".
-    
-    Args:
-        id: The ID of the textbox to modify
-        find_pattern: Text pattern to find (can be plain text or regex)
-        replacement_text: HTML-formatted text to replace matches with.
-            Use HTML syntax like "<b>bold</b>", "<i>italic</i>", "<span style='color: red'>text</span>" etc.
-            Set to empty string ("") to delete the matched text.
-        regex_flags: Regex flags like "IGNORECASE" (default: "IGNORECASE")
-    
-    Returns:
-        str: Confirmation message with details of what was replaced
-    """
-    return _update_textbox_internal(
-        id=id,
-        regex_finder=find_pattern,
-        replacement_text=replacement_text,
-        regex_flags=regex_flags
-    )
+# Tool modify_text_in_textbox removed (functionality covered by update_textbox with operation="find_replace")
 
-@tool
-def add_text_to_textbox(id: int, html_text: str, position: str = "end") -> str:
-    """
-    Add new text to the beginning or end of existing textbox content.
-    
-    This tool preserves all existing text and adds new content before or after it.
-    
-    Args:
-        id: The ID of the textbox to modify
-        html_text: HTML-formatted text to add
-        position: Where to add the text - "start" (beginning) or "end" (default)
-    
-    Returns:
-        str: Confirmation message with details of what was added
-    """
-    operation = "prepend" if position == "start" else "append"
-    return _update_textbox_internal(
-        id=id,
-        html_text=html_text,
-        text_operation=operation
-    )
+# Tool add_text_to_textbox removed (functionality covered by update_textbox with operation="append"/"prepend")
 
 @tool
 def format_textbox_style(id: int, font_size: int = None, font_name: str = None, text_align: str = None, 
