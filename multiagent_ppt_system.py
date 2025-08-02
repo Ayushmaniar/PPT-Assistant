@@ -1,4 +1,4 @@
-from smolagents import CodeAgent, ToolCallingAgent, OpenAIServerModel, tool
+from smolagents import CodeAgent, ToolCallingAgent, OpenAIServerModel, tool, PromptTemplates
 from smolagents.monitoring import LogLevel
 import os
 from dotenv import load_dotenv
@@ -11,6 +11,8 @@ import re
 import PIL
 from PIL import Image
 from typing import Optional
+import yaml
+from importlib.resources import files
 
 # Load environment variables
 load_dotenv()
@@ -34,7 +36,7 @@ if not openai_api_key:
 
 # Define the models - all using GPT-4o as requested
 manager_model = OpenAIServerModel(
-    model_id="gpt-4.1",
+    model_id="gpt-4.1-nano",
     api_key=openai_api_key,
     api_base="https://api.openai.com/v1"
 )
@@ -299,7 +301,7 @@ def add_textbox(slide_idx: int = 1, html_text: str = "<b>Sample Text</b>", left:
             return f"Error adding textbox: {str(e)}"
 
 @tool
-def replace_textbox_content(id: int, html_text: str, font_size: Optional[int] = None, font_name: Optional[str] = None, text_align: Optional[str] = None) -> str:
+def replace_textbox_content(id: int, html_text: str, slide_idx: int = 1, font_size: Optional[int] = None, font_name: Optional[str] = None, text_align: Optional[str] = None) -> str:
     """
     COMPLETELY REPLACE all text content in a textbox with new HTML-formatted text.
     
@@ -320,6 +322,7 @@ def replace_textbox_content(id: int, html_text: str, font_size: Optional[int] = 
     Args:
         id: The ID of the textbox to update
         html_text: New HTML-formatted text content (replaces ALL existing text)
+        slide_idx: The slide number (1-indexed) containing the textbox (default: 1)
         font_size: Base font size in points (headers will be larger)
         font_name: Font name for the text
         text_align: Text alignment - "left", "center", "right", or "justify"
@@ -329,6 +332,7 @@ def replace_textbox_content(id: int, html_text: str, font_size: Optional[int] = 
     """
     return _update_textbox_internal(
         id=id,
+        slide_idx=slide_idx,
         html_text=html_text,
         text_operation="replace",
         font_size=font_size,
@@ -337,19 +341,69 @@ def replace_textbox_content(id: int, html_text: str, font_size: Optional[int] = 
     )
 
 @tool
-def modify_text_in_textbox(id: int, find_pattern: str, replacement_text: str, regex_flags: str = "IGNORECASE") -> str:
+def modify_text_in_textbox(id: int, find_pattern: str, replacement_text: str, slide_idx: int = 1, regex_flags: str = "IGNORECASE") -> str:
     """
-    Find and replace specific text patterns within a textbox while preserving all other text.
+    Find and replace specific text patterns within a textbox while preserving other text.
     
-    This tool modifies only the matching text and keeps everything else unchanged.
-    Perfect for tasks like "make 'Company Name' bold" or "change all dates to red".
+    WHEN TO USE: Format specific words/phrases, resize specific text (titles, headers), update patterns like dates/emails, delete text
+    DON'T USE FOR: Complete text replacement (use replace_textbox_content), adding text (use add_text_to_textbox), formatting entire textbox uniformly (use format_textbox_style)
+    
+    **SELECTIVE SIZING**: Use this tool to make titles/headers bigger while keeping body text unchanged.
+    **GLOBAL SIZING**: Use format_textbox_style only if the entire textbox should have the same size.
+    
+    EXAMPLES:
+    
+    # Make titles/headers bigger (SELECTIVE sizing - most common use case)
+    modify_text_in_textbox(id=12, find_pattern=r"^.*?(?=\n|$)", replacement_text="<span style='font-size: 24px'><b>\\\\g<0></b></span>", regex_flags="MULTILINE")  # First line bigger
+    modify_text_in_textbox(id=34, find_pattern="Project Overview", replacement_text="<span style='font-size: 20px'><b>Project Overview</b></span>")  # Specific title bigger
+    
+    # Make text bold/colored
+    modify_text_in_textbox(id=23, find_pattern="Company Name", replacement_text="<b>Company Name</b>")
+    modify_text_in_textbox(id=15, find_pattern="IMPORTANT", replacement_text="<span style='color: red; font-size: 18px'><b>IMPORTANT</b></span>")
+    
+    # Format patterns with regex
+    modify_text_in_textbox(id=12, find_pattern=r"\\d{1,2}/\\d{1,2}/\\d{4}", replacement_text="<span style='color: blue'>\\\\g<0></span>")  # Dates
+    modify_text_in_textbox(id=34, find_pattern=r"\\$\\d+\\.\\d{2}", replacement_text="<b style='color: green'>\\\\g<0></b>")  # Prices
+    modify_text_in_textbox(id=56, find_pattern=r"\\b\\w+@\\w+\\.\\w+\\b", replacement_text="<u>\\\\g<0></u>")  # Emails
+    
+    # Headers and special formatting
+    modify_text_in_textbox(id=78, find_pattern=r"^(\\w+:)", replacement_text="<span style='font-size: 16px'><b>\\\\g<1></b></span>", regex_flags="MULTILINE")
+    
+    # Make title text bigger (increase any existing title to 32px)
+    modify_text_in_textbox(id=12, find_pattern=r".*", replacement_text="<span style='font-size: 32px'><b>\\\\g<0></b></span>", regex_flags="DOTALL")
+    
+    # Delete text
+    modify_text_in_textbox(id=90, find_pattern="CONFIDENTIAL", replacement_text="")
+    
+    COMMON REGEX PATTERNS:
+    - r"\\d{4}" → 4-digit years
+    - r"\\b[A-Z]{2,}\\b" → ALL CAPS words  
+    - r"\\(\\d{3}\\)\\s*\\d{3}-\\d{4}" → Phone numbers
+    
+    REGEX FLAGS: "IGNORECASE" (default), "MULTILINE", "DOTALL", combine with "|"
+    HTML FORMATTING: <b>bold</b>, <i>italic</i>, <u>underline</u>, <span style='color: red'>colored</span>, <span style='font-size: 20px'>sized</span>
+    
+    PRESERVE MATCH EXPLAINED:
+    Use \\\\g<0> to keep original text within new formatting - this is CRITICAL for dynamic content.
+    
+    WHY PRESERVE MATCH MATTERS:
+    - You often don't know the exact text content (dates, names, prices, etc.)
+    - \\\\g<0> captures whatever the regex matched and wraps it in your formatting
+    - Without this, you'd need to know specific values like "12/25/2024" or "$99.99"
+    - With this, you can format ANY date or price pattern universally
+    
+    PRESERVE MATCH EXAMPLES:
+    ❌ BAD: replacement_text="<b>December 25, 2024</b>"  # Only works for this specific date
+    ✅ GOOD: replacement_text="<b>\\\\g<0></b>"  # Works for ANY date the regex finds
+    
+    ❌ BAD: replacement_text="<span style='color: red'>$99.99</span>"  # Only this price
+    ✅ GOOD: replacement_text="<span style='color: red'>\\\\g<0></span>"  # ANY price
     
     Args:
         id: The ID of the textbox to modify
-        find_pattern: Text pattern to find (can be plain text or regex)
-        replacement_text: HTML-formatted text to replace matches with.
-            Use HTML syntax like "<b>bold</b>", "<i>italic</i>", "<span style='color: red'>text</span>" etc.
-            Set to empty string ("") to delete the matched text.
+        find_pattern: Text pattern to find (plain text or regex)
+        replacement_text: HTML-formatted replacement text (use "" to delete)
+        slide_idx: The slide number (1-indexed) containing the textbox (default: 1)
         regex_flags: Regex flags like "IGNORECASE" (default: "IGNORECASE")
     
     Returns:
@@ -357,13 +411,14 @@ def modify_text_in_textbox(id: int, find_pattern: str, replacement_text: str, re
     """
     return _update_textbox_internal(
         id=id,
+        slide_idx=slide_idx,
         regex_finder=find_pattern,
         replacement_text=replacement_text,
         regex_flags=regex_flags
     )
 
 @tool
-def add_text_to_textbox(id: int, html_text: str, position: str = "end") -> str:
+def add_text_to_textbox(id: int, html_text: str, slide_idx: int = 1, position: str = "end") -> str:
     """
     Add new text to the beginning or end of existing textbox content.
     
@@ -372,6 +427,7 @@ def add_text_to_textbox(id: int, html_text: str, position: str = "end") -> str:
     Args:
         id: The ID of the textbox to modify
         html_text: HTML-formatted text to add
+        slide_idx: The slide number (1-indexed) containing the textbox (default: 1)
         position: Where to add the text - "start" (beginning) or "end" (default)
     
     Returns:
@@ -380,25 +436,36 @@ def add_text_to_textbox(id: int, html_text: str, position: str = "end") -> str:
     operation = "prepend" if position == "start" else "append"
     return _update_textbox_internal(
         id=id,
+        slide_idx=slide_idx,
         html_text=html_text,
         text_operation=operation
     )
 
 @tool
-def format_textbox_style(id: int, font_size: Optional[int] = None, font_name: Optional[str] = None, text_align: Optional[str] = None, 
+def format_textbox_style(id: int, slide_idx: int = 1, font_size: Optional[int] = None, font_name: Optional[str] = None, text_align: Optional[str] = None, 
                         line_spacing: Optional[float] = None, left_margin: Optional[float] = None, right_margin: Optional[float] = None, 
                         top_margin: Optional[float] = None, bottom_margin: Optional[float] = None) -> str:
     """
-    Change the formatting and layout properties of a textbox without modifying text content.
+    Apply GLOBAL formatting to an ENTIRE textbox - affects ALL text uniformly.
     
-    Use this to adjust visual appearance like font, alignment, spacing, and margins.
+    WHEN TO USE: Format entire textbox uniformly (single-purpose textboxes, consistent styling)
+    DON'T USE FOR: Selective formatting (titles, specific words, mixed content) - use modify_text_in_textbox instead
+    
+    WARNING: This changes ALL text in the textbox to the same formatting. 
+    If you need to format only part of the text (like making just the title bigger), use modify_text_in_textbox.
+    
+    EXAMPLES:
+    - Format a single-line header textbox: format_textbox_style(id=12, font_size=24, font_name="Arial", text_align="center")
+    - Adjust margins for bullet points: format_textbox_style(id=34, left_margin=20, line_spacing=1.5)
+    - Change alignment of entire paragraph: format_textbox_style(id=56, text_align="justify")
     
     Args:
         id: The ID of the textbox to format
-        font_size: Base font size in points
-        font_name: Font name for the text
-        text_align: Text alignment - "left", "center", "right", or "justify"
-        line_spacing: Line spacing multiplier (1.0 = single, 1.5 = 1.5x, etc.)
+        slide_idx: The slide number (1-indexed) containing the textbox (default: 1)
+        font_size: Base font size in points (applies to ALL text)
+        font_name: Font name for ALL text
+        text_align: Text alignment for ALL paragraphs - "left", "center", "right", or "justify"
+        line_spacing: Line spacing multiplier for ALL text (1.0 = single, 1.5 = 1.5x, etc.)
         left_margin: Left margin in points
         right_margin: Right margin in points
         top_margin: Top margin in points
@@ -409,6 +476,7 @@ def format_textbox_style(id: int, font_size: Optional[int] = None, font_name: Op
     """
     return _update_textbox_internal(
         id=id,
+        slide_idx=slide_idx,
         font_size=font_size,
         font_name=font_name,
         text_align=text_align,
@@ -420,7 +488,7 @@ def format_textbox_style(id: int, font_size: Optional[int] = None, font_name: Op
     )
 
 @tool
-def move_object(id: int, left: int, top: int) -> str:
+def move_object(id: int, left: int, top: int, slide_idx: int = 1) -> str:
     """
     Move any object (textbox, shape, image, etc.) to new coordinates on the slide.
     
@@ -433,6 +501,7 @@ def move_object(id: int, left: int, top: int) -> str:
         id: The ID of the object to move
         left: Distance from left edge of slide in points (0-960 for standard slide)
         top: Distance from top edge of slide in points (0-540 for standard slide)
+        slide_idx: The slide number (1-indexed) containing the object (default: 1)
     
     Returns:
         str: Confirmation message with the object's new position
@@ -441,6 +510,17 @@ def move_object(id: int, left: int, top: int) -> str:
     try:
         ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
         presentation = ppt_app.ActivePresentation
+        
+        # Search specified slide first, then fall back to all slides
+        if slide_idx <= presentation.Slides.Count:
+            slide = presentation.Slides(slide_idx)
+            for shape in slide.Shapes:
+                if shape.Id == id:
+                    shape.Left = left
+                    shape.Top = top
+                    return f"Moved object {id} to position ({left}, {top}) on slide {slide.SlideIndex}"
+        
+        # Fallback: search all slides if not found on specified slide
         for slide in presentation.Slides:
             for shape in slide.Shapes:
                 if shape.Id == id:
@@ -452,7 +532,7 @@ def move_object(id: int, left: int, top: int) -> str:
         return f"Error moving object {id}: {str(e)}"
 
 @tool
-def resize_object(id: int, width: int, height: int) -> str:
+def resize_object(id: int, width: int, height: int, slide_idx: int = 1) -> str:
     """
     Change the size of any object (textbox, shape, image, etc.) to new dimensions.
     
@@ -460,6 +540,7 @@ def resize_object(id: int, width: int, height: int) -> str:
         id: The ID of the object to resize
         width: New width in points
         height: New height in points
+        slide_idx: The slide number (1-indexed) containing the object (default: 1)
     
     Returns:
         str: Confirmation message with the object's new dimensions
@@ -468,6 +549,17 @@ def resize_object(id: int, width: int, height: int) -> str:
     try:
         ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
         presentation = ppt_app.ActivePresentation
+        
+        # Search specified slide first, then fall back to all slides
+        if slide_idx <= presentation.Slides.Count:
+            slide = presentation.Slides(slide_idx)
+            for shape in slide.Shapes:
+                if shape.Id == id:
+                    shape.Width = width
+                    shape.Height = height
+                    return f"Resized object {id} to {width}×{height} points on slide {slide.SlideIndex}"
+        
+        # Fallback: search all slides if not found on specified slide
         for slide in presentation.Slides:
             for shape in slide.Shapes:
                 if shape.Id == id:
@@ -479,7 +571,7 @@ def resize_object(id: int, width: int, height: int) -> str:
         return f"Error resizing object {id}: {str(e)}"
 
 @tool
-def position_and_resize_object(id: int, left: int, top: int, width: int, height: int) -> str:
+def position_and_resize_object(id: int, left: int, top: int, width: int, height: int, slide_idx: int = 1) -> str:
     """
     Move and resize an object in a single operation for precise positioning.
     
@@ -491,6 +583,7 @@ def position_and_resize_object(id: int, left: int, top: int, width: int, height:
         top: Distance from top edge of slide in points
         width: New width in points
         height: New height in points
+        slide_idx: The slide number (1-indexed) containing the object (default: 1)
     
     Returns:
         str: Confirmation message with the object's new position and size
@@ -499,6 +592,19 @@ def position_and_resize_object(id: int, left: int, top: int, width: int, height:
     try:
         ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
         presentation = ppt_app.ActivePresentation
+        
+        # Search specified slide first, then fall back to all slides
+        if slide_idx <= presentation.Slides.Count:
+            slide = presentation.Slides(slide_idx)
+            for shape in slide.Shapes:
+                if shape.Id == id:
+                    shape.Left = left
+                    shape.Top = top
+                    shape.Width = width
+                    shape.Height = height
+                    return f"Positioned object {id} at ({left}, {top}) with size {width}×{height} on slide {slide.SlideIndex}"
+        
+        # Fallback: search all slides if not found on specified slide
         for slide in presentation.Slides:
             for shape in slide.Shapes:
                 if shape.Id == id:
@@ -574,7 +680,7 @@ def copy_object_to_slide(id: int, target_slide_idx: int, new_left: Optional[int]
         return -1
 
 @tool
-def duplicate_object_on_same_slide(id: int, offset_left: int = 20, offset_top: int = 20) -> int:
+def duplicate_object_on_same_slide(id: int, slide_idx: int = 1, offset_left: int = 20, offset_top: int = 20) -> int:
     """
     Create a duplicate of an object on the same slide with a slight position offset.
     
@@ -582,6 +688,7 @@ def duplicate_object_on_same_slide(id: int, offset_left: int = 20, offset_top: i
     
     Args:
         id: The ID of the object to duplicate
+        slide_idx: The slide number (1-indexed) containing the object (default: 1)
         offset_left: How many points to move the duplicate to the right (default: 20)
         offset_top: How many points to move the duplicate down (default: 20)
     
@@ -593,15 +700,24 @@ def duplicate_object_on_same_slide(id: int, offset_left: int = 20, offset_top: i
         ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
         presentation = ppt_app.ActivePresentation
         
-        # Find source object
+        # Find source object - search specified slide first
         source_shape = None
-        for slide in presentation.Slides:
+        if slide_idx <= presentation.Slides.Count:
+            slide = presentation.Slides(slide_idx)
             for shape in slide.Shapes:
                 if shape.Id == id:
                     source_shape = shape
                     break
-            if source_shape:
-                break
+        
+        # Fallback: search all slides if not found on specified slide
+        if not source_shape:
+            for slide in presentation.Slides:
+                for shape in slide.Shapes:
+                    if shape.Id == id:
+                        source_shape = shape
+                        break
+                if source_shape:
+                    break
         
         if not source_shape:
             return -1
@@ -622,7 +738,7 @@ def duplicate_object_on_same_slide(id: int, offset_left: int = 20, offset_top: i
         return -1
 
 @tool
-def delete_object(id: int) -> str:
+def delete_object(id: int, slide_idx: int = 1) -> str:
     """
     Permanently delete an object from the slide.
     
@@ -630,6 +746,7 @@ def delete_object(id: int) -> str:
     
     Args:
         id: The ID of the object to delete
+        slide_idx: The slide number (1-indexed) containing the object (default: 1)
     
     Returns:
         str: Confirmation message of deletion
@@ -638,6 +755,27 @@ def delete_object(id: int) -> str:
     try:
         ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
         presentation = ppt_app.ActivePresentation
+        
+        # Search specified slide first, then fall back to all slides
+        if slide_idx <= presentation.Slides.Count:
+            slide = presentation.Slides(slide_idx)
+            for shape in slide.Shapes:
+                if shape.Id == id:
+                    shape_name = shape.Name
+                    slide_num = slide.SlideIndex
+                    shape.Delete()
+                    
+                    # Clear slide context cache after deletion
+                    try:
+                        reader = get_slide_reader()
+                        if reader:
+                            reader.clear_context_cache()
+                    except Exception:
+                        pass
+                    
+                    return f"Deleted object '{shape_name}' (ID: {id}) from slide {slide_num}"
+        
+        # Fallback: search all slides if not found on specified slide
         for slide in presentation.Slides:
             for shape in slide.Shapes:
                 if shape.Id == id:
@@ -658,7 +796,7 @@ def delete_object(id: int) -> str:
     except Exception as e:
         return f"Error deleting object {id}: {str(e)}"
 
-def _update_textbox_internal(id: int, html_text: Optional[str] = None, text_operation: str = "replace", regex_finder: Optional[str] = None, replacement_text: Optional[str] = None, regex_flags: str = "IGNORECASE", font_size: Optional[int] = None, font_name: Optional[str] = None, text_align: Optional[str] = None, line_spacing: Optional[float] = None, left_margin: Optional[float] = None, right_margin: Optional[float] = None, top_margin: Optional[float] = None, bottom_margin: Optional[float] = None) -> str:
+def _update_textbox_internal(id: int, slide_idx: int = 1, html_text: Optional[str] = None, text_operation: str = "replace", regex_finder: Optional[str] = None, replacement_text: Optional[str] = None, regex_flags: str = "IGNORECASE", font_size: Optional[int] = None, font_name: Optional[str] = None, text_align: Optional[str] = None, line_spacing: Optional[float] = None, left_margin: Optional[float] = None, right_margin: Optional[float] = None, top_margin: Optional[float] = None, bottom_margin: Optional[float] = None) -> str:
     """Internal implementation for textbox updates. Do not call directly."""
     pythoncom.CoInitialize()
     
@@ -675,18 +813,29 @@ def _update_textbox_internal(id: int, html_text: Optional[str] = None, text_oper
         ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
         presentation = ppt_app.ActivePresentation
         
-        # Find the textbox by ID
+        # Find the textbox by ID - search only the specified slide if slide_idx provided
         target_shape = None
         target_slide = None
         
-        for slide in presentation.Slides:
-            for shape in slide.Shapes:
-                if shape.Id == id:
-                    target_shape = shape
-                    target_slide = slide
+        if slide_idx:
+            # Search only the specified slide
+            if slide_idx <= presentation.Slides.Count:
+                slide = presentation.Slides(slide_idx)
+                for shape in slide.Shapes:
+                    if shape.Id == id:
+                        target_shape = shape
+                        target_slide = slide
+                        break
+        else:
+            # Fallback: search all slides if slide_idx not provided
+            for slide in presentation.Slides:
+                for shape in slide.Shapes:
+                    if shape.Id == id:
+                        target_shape = shape
+                        target_slide = slide
+                        break
+                if target_shape:
                     break
-            if target_shape:
-                break
         
         if not target_shape:
             return f"Shape with ID {id} not found"
@@ -825,16 +974,19 @@ def _update_textbox_internal(id: int, html_text: Optional[str] = None, text_oper
                     if replacement_text is not None:
                         # Check if replacement contains HTML formatting
                         if any(marker in replacement_text for marker in ['<b>', '<i>', '<u>', '<s>', '<span', '<strong>', '<em>']):
-                            processed_replacement, _ = process_html_lists(replacement_text)
-                            plain_replacement, format_segments = parse_html_text(processed_replacement)
-                            
-                            # Process matches in reverse order to maintain position indices
+                            # HTML formatting with regex replacement - handle each match individually
                             for match in reversed(matches):
                                 match_start = match.start()
                                 match_end = match.end()
                                 match_length = match_end - match_start
+                                matched_text = match.group(0)
                                 
-                                # Replace this specific match in the textbox without affecting the rest
+                                # Process the replacement text with match substitution
+                                processed_replacement = re.sub(regex_finder, replacement_text, matched_text, flags=flags)
+                                processed_replacement, _ = process_html_lists(processed_replacement)
+                                plain_replacement, format_segments = parse_html_text(processed_replacement)
+                                
+                                # Replace this specific match in the textbox
                                 if match_length > 0:
                                     match_range = target_shape.TextFrame.TextRange.Characters(match_start + 1, match_length)
                                     match_range.Text = plain_replacement
@@ -889,7 +1041,7 @@ def _update_textbox_internal(id: int, html_text: Optional[str] = None, text_oper
                                     # Update the current_text to reflect the change for subsequent matches
                                     current_text = target_shape.TextFrame.TextRange.Text
                         else:
-                            # Simple text replacement without HTML formatting
+                            # Simple text replacement without HTML formatting - supports \\g<0> patterns
                             new_text = re.sub(regex_finder, replacement_text, current_text, flags=flags)
                             target_shape.TextFrame.TextRange.Text = new_text
                         
@@ -903,6 +1055,10 @@ def _update_textbox_internal(id: int, html_text: Optional[str] = None, text_oper
         # Apply global font settings that don't conflict with markdown
         if target_shape.TextFrame.HasText:
             text_range = target_shape.TextFrame.TextRange
+            
+            if font_size:
+                text_range.Font.Size = font_size
+                updates_made.append(f"set font size to {font_size} points for entire text")
             
             if font_name:
                 text_range.Font.Name = font_name
@@ -959,32 +1115,74 @@ def _update_textbox_internal(id: int, html_text: Optional[str] = None, text_oper
 # ============================================================================
 
 vision_agent_instructions = """
-You are a PowerPoint slide visual analysis expert. Your job is to analyze slide images and provide detailed feedback.
+You are a PowerPoint slide visual analysis expert specialized in providing detailed, actionable feedback for slide improvements. Your analysis directly informs a Writing Agent that will implement your suggestions using PowerPoint automation tools.
 
 CAPABILITIES:
-- Analyze visual layout, spacing, alignment, and design aesthetics
+- Analyze visual layout, spacing, alignment, and design aesthetics with precision
 - Identify objects by their ID labels (shown as yellow "ID:X" tags in green bounding boxes)
-- Provide specific actionable suggestions with object IDs
+- Provide specific actionable suggestions with exact object IDs and measurements
+- Evaluate design principles: hierarchy, balance, contrast, and professional appearance
 - Answer specific questions about visual elements and spatial relationships
 
+ANALYSIS FRAMEWORK:
+1. **Holistic Assessment**: Overall slide composition, visual flow, and professional appearance
+2. **Object-Specific Analysis**: Individual elements, their positioning, sizing, and styling
+3. **Spatial Relationships**: Alignment, spacing, distribution, and visual hierarchy
+4. **Design Quality**: Color harmony, typography consistency, visual balance
+5. **Actionable Recommendations**: Specific improvements with implementation details
+
 RESPONSE FORMAT:
-Always use the final_answer tool in to provide your complete analysis including:
+Always use the final_answer tool to provide your complete analysis including:
 
-1. VISUAL DESCRIPTION: Describe what you see on the slide
-2. SPATIAL ANALYSIS: Comment on positioning, alignment, spacing
-3. AESTHETIC FEEDBACK: Overall design quality, visual appeal, color usage
-4. SPECIFIC SUGGESTIONS: Actionable improvements with exact object IDs
+**VISUAL DESCRIPTION:**
+- Comprehensive overview of slide contents and layout
+- Identification of key elements and their relationships
+- Overall visual impression and design assessment
 
-EXAMPLE RESPONSE:
-"VISUAL DESCRIPTION: I see a slide with 3 textboxes...
-SPATIAL ANALYSIS: The title (ID:15) is well-centered, but the body text (ID:23) appears too close to the left edge...
-AESTHETIC FEEDBACK: The slide has good contrast but could benefit from better vertical spacing...
-SPECIFIC SUGGESTIONS: 
-- Move textbox ID:23 to position (150, 200) for better alignment
-- Increase font size of textbox ID:15 to make it more prominent
-- Consider adding more space between elements"
+**SPATIAL ANALYSIS:**
+- Precise measurements and positioning feedback
+- Alignment issues with specific corrections needed
+- Spacing inconsistencies and recommended adjustments
+- Distribution of elements and balance assessment
 
-Always be specific and reference object IDs when making suggestions.
+**AESTHETIC FEEDBACK:**
+- Professional appearance evaluation
+- Color scheme and typography assessment
+- Visual hierarchy effectiveness
+- Design principle adherence (contrast, balance, unity)
+
+**SPECIFIC ACTIONABLE SUGGESTIONS:**
+- Exact object IDs with recommended changes
+- Precise measurements for repositioning/resizing
+- Specific formatting improvements
+- Priority ranking of suggested modifications
+
+MEASUREMENT PRECISION:
+- Reference the PowerPoint coordinate system (0,0 = top-left, 960×540 slide)
+- Provide specific pixel/point measurements when relevant
+- Use relative positioning references ("move 20 points right", "increase height by 50 points")
+- Consider standard spacing conventions (margins, padding, alignment grids)
+
+IMPLEMENTATION FOCUS:
+Your suggestions will be implemented by a Writing Agent with PowerPoint automation tools, so ensure recommendations are:
+- Technically feasible with PowerPoint COM interface
+- Specific enough to execute without ambiguity
+- Prioritized by impact and importance
+- Comprehensive but not overwhelming
+
+EXAMPLE RESPONSE STRUCTURE:
+"**VISUAL DESCRIPTION:** I see a slide with a title, two bullet point sections, and an image...
+
+**SPATIAL ANALYSIS:** The title (ID 15) is well-centered horizontally but positioned too high at Y 50 - recommend moving to Y 80 for better proportions. The body text (ID 23) appears cramped against the left edge at X 50 - move to X 100 for proper margin...
+
+**AESTHETIC FEEDBACK:** The slide demonstrates good contrast but suffers from inconsistent spacing. Typography is professional but could benefit from size hierarchy adjustments...
+
+**SPECIFIC ACTIONABLE SUGGESTIONS:**
+1. HIGH PRIORITY: Move title ID 15 from current position to (430, 80) for better vertical balance
+2. MEDIUM PRIORITY: Increase font size of ID 23 from current to 18 points for improved readability
+3. LOW PRIORITY: Adjust spacing between bullet points in ID 23 by setting line spacing to 1.5..."
+
+Always be specific, reference object IDs, provide measurements, and focus on implementable improvements that enhance professional appearance and readability.
 """
 
 # ============================================================================
@@ -992,28 +1190,189 @@ Always be specific and reference object IDs when making suggestions.
 # ============================================================================
 
 writing_agent_instructions = """
-You are a PowerPoint automation specialist that executes slide modifications using specialized tools.
+You are a PowerPoint automation specialist who executes slide modifications using specialized tools and code. You are designed to work as part of a multi-agent system where you receive instructions from a Manager Agent.
 
-IMPORTANT: You will receive current slide context and specific instructions from the Manager Agent.
+To solve tasks, you have been given access to PowerPoint-specific tools that are Python functions you can call with code.
+You must plan forward to proceed in a series of steps, in a cycle of 'Thought:', '<code>', and 'Observation:' sequences.
 
-CAPABILITIES:
-- Add, modify, move, resize, and delete PowerPoint objects
-- Apply HTML formatting to text content
-- Handle positioning and layout adjustments
-- Manage object properties and styling
+At each step, in the 'Thought:' sequence, you should first explain your reasoning towards solving the PowerPoint task and the tools you want to use.
+Then in the '<code>' sequence, you should write the code in simple Python. The code sequence must end with '</code>' sequence.
+During each intermediate step, you can use 'print()' to save whatever important information you will then need.
+These print outputs will then appear in the 'Observation:' field, which will be available as input for the next step.
+In the end you have to return a final answer using the final_answer tool.
 
-RULES:
-- Always use object IDs from the slide context for reliable reference
-- Consider existing content positioning when adding new elements
-- Match existing fonts/styles when appropriate for consistency
-- Use multiple tools together when they accomplish related goals efficiently
+*POWERPOINT AUTOMATION CAPABILITIES:*
+- Add, modify, move, resize, and delete PowerPoint objects (textboxes, shapes, images)
+- Apply HTML formatting to text content with rich styling options
+- Handle precise positioning and layout adjustments
+- Manage object properties, styling, and visual consistency
+- Copy and duplicate objects across slides
+- Format text with HTML tags: <b>bold</b>, <i>italic</i>, <u>underlined</u>, <span style="color: red">colored</span>, etc.
 
-COORDINATE SYSTEM:
-- Origin (0,0) = top-left corner
-- Standard slide: 960 points wide × 540 points tall
-- Measurements in points (72 points = 1 inch)
+*COORDINATE SYSTEM (CRITICAL):*
+- Origin (0,0) = top-left corner of slide
+- Standard slide dimensions: 960 points wide × 540 points tall
+- All measurements in points (72 points = 1 inch)
+- X-axis: 0 (left edge) to 960 (right edge)
+- Y-axis: 0 (top edge) to 540 (bottom edge)
 
-Focus on precise execution of PowerPoint operations using the available tools.
+*POWERPOINT-SPECIFIC RULES:*
+1. *Object ID Management*: Always use object IDs from slide context provided by Manager Agent for reliable reference
+2. *Positioning Awareness*: Consider existing content positioning when adding new elements to avoid overlaps
+3. *Style Consistency*: Match existing fonts, colors, and styles when appropriate for visual consistency
+4. *Efficient Tool Usage*: Use multiple tools together when they accomplish related goals efficiently
+5. *Error Prevention*: Log detailed information about tool execution, especially errors, to help with debugging
+6. *HTML Formatting*: Leverage HTML tags for rich text formatting instead of basic text
+7. *Layout Planning*: Think about slide layout and visual hierarchy when positioning elements
+8. *COM Error Handling*: Be prepared for PowerPoint COM interface errors and log them clearly
+9. *Batch Operations*: When possible, group similar operations together for efficiency
+10. *State Preservation*: Maintain awareness of slide state changes between operations
+
+
+
+*TASK CONTEXT:*
+You will receive instructions from the Manager Agent that include:
+- Current slide context with existing object IDs and positions
+- Specific modification tasks to execute
+- Overall goal of the PowerPoint automation task
+- Visual feedback from Vision Agent when applicable
+
+*CRITICAL: SLIDE CONTEXT AWARENESS*
+ALWAYS work based on the current slide context provided by the Manager Agent:
+- Use the exact slide numbers mentioned in the context
+- Reference only object IDs that exist in the current slide context
+- Verify slide indices before executing any slide-specific operations
+- If context mentions "Slide 2" or specific slide numbers, use those exact numbers in your tool calls
+- Never assume slide numbers - always use what's provided in the context
+- When adding new content, consider the slide number where the user wants the content placed
+
+*INFORMATION FLOW:*
+- Print important information during tool execution for debugging
+- Log object IDs after creating new objects
+- Report positioning and sizing details when relevant
+- Confirm successful completion of modifications
+- Log any errors with sufficient detail for troubleshooting
+
+*WORKFLOW APPROACH:*
+1. Analyze the task and current slide context provided by Manager Agent - VERIFY SLIDE NUMBERS
+2. Plan the sequence of PowerPoint operations needed for the CORRECT slide
+3. Execute tools step-by-step with proper error checking and logging
+4. Verify positioning and layout as you work
+5. Consider visual hierarchy and design principles
+6. Provide clear final answer confirming task completion
+
+*SLIDE VERIFICATION CHECKLIST:*
+- Check which slide number is mentioned in the task context
+- Use the exact slide index provided (slide_idx parameter)
+- If working with existing objects, verify they exist on the target slide
+- When in doubt, print the slide context to confirm you're working on the right slide
+
+
+
+
+
+*WORKING CODE EXAMPLES:*
+The following are examples of how to properly use the PowerPoint tools. These are just examples - you may need to write completely different code depending on your specific task:
+
+**Example 1: Adding a Centered Headline (with slide context verification)**
+<code>
+# Constants for the slide dimensions
+slide_width = 960
+slide_height = 540
+
+# Variables for headline textbox
+headline_text = "Why Valorant is So Cool"
+headline_left = slide_width // 2 - 200  # Centered horizontally
+headline_top = 20  # Positioned at the top of the slide
+headline_width = 400  # A reasonable width for headline text
+headline_height = 50  # Height for the headline space
+
+# Step 1: Add the headline textbox with the specified styling
+headline_result = add_textbox(
+    slide_idx=1,
+    html_text=f"<b style='font-size:32px'>{headline_text}</b>",
+    left=headline_left,
+    top=headline_top,
+    width=headline_width,
+    height=headline_height,
+    font_size=32,
+    text_align="center"
+)
+print(headline_result)
+</code>
+**Example 2: Adding Detailed Content with HTML Formatting (with slide verification)**
+<code>
+# Variables for the detailed content textbox
+detail_content = '''
+<b>Valorant</b> is a tactical first-person shooter that has captured the hearts of players around the world. Here’s why it’s so cool:
+<ul>
+  <li><b>Unique Agents & Abilities:</b> Each agent has special skills, bringing variety and strategy to every match.</li>
+  <li><b>Teamwork & Communication:</b> Winning requires real teamwork and tactical planning, creating intense and rewarding gameplay moments.</li>
+  <li><b>Competitive Spirit:</b> Valorant’s ranked mode lets players test their skills against others and progress up the leaderboard.</li>
+  <li><b>Stunning Design:</b> The maps and visual effects are bright, stylish, and full of personality, making each round visually engaging.</li>
+  <li><b>Constant Updates:</b> Riot Games regularly adds new agents, maps, and content, keeping the experience fresh and exciting.</li>
+</ul>
+Valorant is not just another shooter — it’s a thrilling, ever-evolving esport that puts skill, strategy, and creativity front and center.
+'''
+detail_left = 50  # To ensure there is enough margin on the left
+detail_top = 100  # Below the headline with some spacing
+detail_width = slide_width - 100  # Leaving some margin on both sides for readability
+detail_height = 400  # Leaving space at bottom of the slide
+
+# Step 2: Add the detailed content textbox with the specified formatting
+detail_result = add_textbox(
+    slide_idx=1,
+    html_text=detail_content,
+    left=detail_left,
+    top=detail_top,
+    width=detail_width,
+    height=detail_height,
+    font_size=14,
+    text_align="left"
+)
+print(detail_result)
+</code>
+**Example 3: Proper Final Answer**
+<code>
+final_answer("The requested content has been successfully added to your slide:
+
+- A prominent, centered headline textbox with the title “Why Valorant is So Cool” has been placed at the top of the slide, using bold and large font for clear emphasis.
+- Below the headline, a spacious, centrally positioned detailed textbox has been inserted containing well-formatted HTML bullet points and short paragraphs. These points explain what makes Valorant appealing—including unique agent abilities, the need for teamwork, competitive nature, visual design, and regular updates.
+- Both text boxes are laid out with good spacing from the slide edges for readability and a coherent, visually appealing result.
+
+Your slide is now professional and presentable for introducing or promoting Valorant. Let me know if you’d like further modifications!")
+</code>
+**Key Patterns from Examples:**
+- ALWAYS verify slide numbers from the task context before executing tools
+- Define clear variables for positioning and dimensions
+- Use slide constants (slide_width=960, slide_height=540) for calculations
+- Calculate positions relative to slide dimensions for proper layout
+- Use descriptive variable names and comments
+- Print results after each tool call for debugging
+- Use HTML formatting effectively for rich text styling
+- Provide detailed final_answer with summary of actions taken
+- Reference correct slide indices in all tool calls (slide_idx parameter)
+- When working with existing objects, ensure they exist on the target slide
+
+{{tool_descriptions}}
+
+{{managed_agents_descriptions}}
+
+Remember: These are just examples! Your actual code should be tailored to the specific task you're given.
+*CORE CODING RULES:*
+1. Always provide a 'Thought:' sequence, and a '<code>' sequence ending with '</code>', else you will fail.
+2. Use only variables that you have defined!
+3. Always use the right arguments for tools. Use arguments directly like 'result = add_textbox(slide_idx=1, html_text="<b>Hello</b>", left=100, top=50, width=200, height=100, font_size=14, font_name="Arial", text_align="center")'
+4. Don't chain too many sequential tool calls in the same code block, especially when output format is unpredictable
+5. Call a tool only when needed, and never re-do a tool call with the exact same parameters
+6. Don't name any new variable with the same name as a tool: for instance don't name a variable 'final_answer'
+7. Never create any notional variables in your code, as having these in your logs will derail you from the true variables
+8. You can use imports from: {{authorized_imports}}
+9. The state persists between code executions: variables and imports persist across steps
+10. Don't give up! You're in charge of solving the task, not providing directions to solve it
+Focus on precise execution of PowerPoint operations. Work systematically and always consider the visual impact of your modifications on the overall slide design. Remember that you are creating presentations that should be visually appealing and professionally formatted.
+
+Now Begin! Execute PowerPoint automation tasks with precision and attention to detail.
 """
 
 # ============================================================================
@@ -1021,42 +1380,384 @@ Focus on precise execution of PowerPoint operations using the available tools.
 # ============================================================================
 
 manager_agent_instructions = """
-You are an intelligent PowerPoint Assistant Manager that orchestrates a team of specialized agents.
+You are an intelligent Multi-Agent PowerPoint Orchestrator who coordinates specialized agents to deliver comprehensive slide automation solutions. You operate as a CodeAgent with systematic reasoning capabilities and access to PowerPoint analysis tools.
 
-YOUR TEAM:
-1. Vision Agent: Analyzes slide visuals and provides aesthetic feedback with specific suggestions
-2. Writing Agent: Executes all PowerPoint modifications using specialized tools
+To solve tasks, you have been given access to PowerPoint analysis tools that are Python functions you can call with code.
+You must plan forward to proceed in a series of steps, in a cycle of 'Thought:', '<code>', and 'Observation:' sequences.
 
-DECISION MAKING:
-You should call the Vision Agent when the user request involves:
-- Visual improvements ("make it look better", "improve design", "fix alignment")
-- Layout analysis ("how does this look", "what's wrong with the spacing")
-- Aesthetic feedback ("make it more professional", "improve the visual appeal")
-- Questions about visual elements ("what do you see", "describe the slide")
+At each step, in the 'Thought:' sequence, you should first explain your reasoning towards solving the PowerPoint task and the tools/agents you want to use.
+Then in the '<code>' sequence, you should write the code in simple Python. The code sequence must end with '</code>' sequence.
+During each intermediate step, you can use 'print()' to save whatever important information you will then need.
+These print outputs will then appear in the 'Observation:' field, which will be available as input for the next step.
+In the end you have to return a final answer using the final_answer tool.
 
-IMPORTANT NOTE REGARDING VISION AGENT:
-- You must call the get_annotated_slide_image_tool() before calling the vision agent.
-- Store the image in a variable and pass it to the vision agent using images = [image_variable].
-- Do all this in a single step and one action itself. (don't use multiple steps)
+## YOUR TEAM
+1. **Vision Agent**: Analyzes slide visuals and provides aesthetic feedback with specific, actionable suggestions
+2. **Writing Agent**: Executes all PowerPoint modifications using specialized tools with step-by-step code execution
 
-You should call the Writing Agent when:
-- User wants to add/modify content
+## CORE WORKFLOW FRAMEWORK
+You must follow the systematic 'Thought:', '<code>', and 'Observation:' cycle for all operations:
+
+- **'Thought:'**: Analyze the situation, plan your approach, and decide which tools/agents to use
+- **'<code>'**: Execute tools to gather context, coordinate agents, or validate results  
+- **'Observation:'**: Review outputs and plan next steps
+- Use `print()` to log important information, decisions, and progress
+- End with `final_answer()` tool providing a comprehensive summary
+
+## DECISION MAKING FRAMEWORK
+
+### Call Vision Agent When:
+- Visual improvements ("make it look better", "improve design", "fix alignment", "enhance layout")
+- Layout analysis ("how does this look", "what's wrong with the spacing", "analyze the design")  
+- Aesthetic feedback ("make it more professional", "improve the visual appeal", "better color scheme")
+- Questions about visual elements ("what do you see", "describe the slide", "identify issues")
+- Design validation ("does this look good", "review the layout", "check alignment")
+
+### Call Writing Agent When:
+- User wants to add/modify content (text, objects, formatting)
 - User wants to move/resize objects
 - User wants to apply formatting changes
 - User has specific modification requests
+- Implementing suggestions from Vision Agent feedback
 
-WORKFLOW:
-1. Analyze the user request to determine which agents are needed
-2. If visual analysis is needed, call Vision Agent
-3. Pass relevant context and instructions to the Writing Agent for execution
-4. Provide a final summary to the user using the final_answer tool in code
+## SYSTEMATIC WORKFLOW PROTOCOL
 
-CONTEXT SHARING:
-- Always share the current slide context with your agents
-- Pass specific findings from Vision Agent to Writing Agent when relevant
-- Provide clear, actionable instructions to the Writing Agent
+### 1. Context Gathering Phase
+Use this pattern for all task initiation:
+<code>
+# Always start with fresh slide context
+print("=== CONTEXT GATHERING PHASE ===")
+current_context = get_current_slide_context_tool()
+print("Current slide context retrieved:")
+print(current_context)
 
-Remember: You coordinate the workflow but the Writing Agent does all PowerPoint modifications.
+# Log context analysis
+print("Context Analysis:")
+print("- Slide count: [extract from context]")
+print("- Active slide: [extract from context]") 
+print("- Object count: [extract from context]")
+print("- Key objects: [list main objects with IDs]")
+<\code>
+
+### 2. Request Analysis Phase
+<code>
+print("=== REQUEST ANALYSIS PHASE ===")
+print("Request Analysis:")
+print("- Request type: [visual/content/mixed]")
+print("- Complexity: [simple/moderate/complex]")
+print("- Required agents: [Vision/Writing/Both]")
+print("- Expected operations: [list anticipated actions]")
+<\code>
+
+### 3. Vision Agent Coordination (when needed)
+<code>
+print("=== VISION AGENT COORDINATION ===")
+# Get annotated slide image for vision analysis
+print("Preparing visual analysis...")
+slide_image = get_annotated_slide_image_tool()
+if slide_image:
+    print("SUCCESS: Slide image captured successfully")
+    # Call vision agent with specific task and image
+    vision_feedback = vision_agent(
+        task="[Specific analysis request based on user need]",
+        images=[slide_image]
+    )
+    print("Vision Agent Feedback:")
+    print(vision_feedback)
+else:
+    print("ERROR: Failed to capture slide image")
+</code>
+
+### 4. Writing Agent Coordination (when needed)
+Use this structured instruction format for Writing Agent:
+
+<code>
+print("=== WRITING AGENT COORDINATION ===")
+# Structured instruction format for Writing Agent
+writing_instructions = '''
+TASK CONTEXT:
+- Current slide context: ''' + str(current_context) + '''
+- Target slide(s): [specific slide numbers]
+- Operation type: [add/modify/move/resize/delete]
+
+SPECIFIC REQUIREMENTS:
+- Object IDs to work with: [list specific IDs from context]
+- Positioning requirements: [exact coordinates/relative positioning]
+- Formatting specifications: [fonts, colors, sizes, styles]
+- Content specifications: [text content, HTML formatting]
+
+EXECUTION CONSTRAINTS:
+- Use slide_idx parameter: [specific slide number]
+- Verify object existence before operations
+- Log all intermediate results
+- Confirm successful completion
+
+QUALITY CHECKS:
+- Validate positioning within slide boundaries (960 x 540)
+- Ensure proper spacing and alignment
+- Verify text formatting and readability
+- Check for overlapping elements
+
+EXPECTED OUTCOME:
+[Clear description of final state]
+'''
+
+print("Coordinating Writing Agent...")
+print("Instructions being sent:")
+print(writing_instructions)
+
+writing_result = writing_agent(task=writing_instructions)
+print("Writing Agent Result:")
+print(writing_result)
+</code>
+
+### 5. Context Refresh Protocol
+<code>
+print("=== CONTEXT REFRESH PROTOCOL ===")
+# Refresh context after Writing Agent operations
+print("Refreshing slide context after operations...")
+updated_context = get_current_slide_context_tool()
+print("Updated context:")
+print(updated_context)
+
+# Compare changes
+print("Changes detected:")
+print("- [List specific changes between old and new context]")
+</code>
+
+### 6. Error Handling Framework
+<code>
+print("=== ERROR HANDLING FRAMEWORK ===")
+# Check for errors in agent outputs
+def validate_agent_output(agent_output, agent_name):
+    if "error" in agent_output.lower() or "failed" in agent_output.lower():
+        print(f"ERROR: {agent_name} reported error: {agent_output}")
+        # Implement retry logic here
+        return False
+    else:
+        print(f"SUCCESS: {agent_name} completed successfully")
+        return True
+
+# Example usage:
+if not validate_agent_output(writing_result, "Writing Agent"):
+    print("Attempting retry with modified instructions...")
+    # Retry logic here
+</code>
+
+## TOOL USAGE PATTERNS
+
+### Context Management Tools:
+- `get_current_slide_context_tool()`: Always use at start and after Writing Agent operations
+- `get_object_properties(id)`: Use to inspect specific objects before modifications
+- `get_annotated_slide_image_tool()`: Required before calling Vision Agent
+
+### Object Inspection Pattern:
+<code>
+# When user references specific objects
+object_details = get_object_properties(object_id)
+print(f"Object {object_id} details:")
+print(f"- Position: ({object_details.get('left', 'N/A')}, {object_details.get('top', 'N/A')})")
+print(f"- Size: {object_details.get('width', 'N/A')}x{object_details.get('height', 'N/A')}")
+print(f"- Type: {object_details.get('type_name', 'N/A')}")
+</code>
+
+## WORKING CODE EXAMPLES
+
+The following are examples of how to properly coordinate the multi-agent system. These are templates - adapt them to your specific task:
+
+**Example 1: Complete Visual Analysis and Improvement Workflow**
+<code>
+# Step 1: Gather initial context
+print("=== INITIATING VISUAL ANALYSIS WORKFLOW ===")
+current_context = get_current_slide_context_tool()
+print("Current slide context:")
+print(current_context)
+
+# Step 2: Capture slide image and analyze with Vision Agent
+print("Capturing slide image for visual analysis...")
+slide_image = get_annotated_slide_image_tool()
+if slide_image:
+    print("SUCCESS: Image captured successfully")
+    vision_feedback = vision_agent(
+        task="Analyze the slide layout and provide specific improvement suggestions with object IDs and measurements",
+        images=[slide_image]
+    )
+    print("Vision Agent Analysis:")
+    print(vision_feedback)
+else:
+    print("ERROR: Failed to capture slide image")
+</code>
+
+**Example 2: Coordinating Writing Agent with Structured Instructions**
+<code>
+# Step 3: Translate vision feedback into actionable Writing Agent task
+writing_task = '''
+TASK CONTEXT:
+- Current slide context: ''' + str(current_context) + '''
+- Vision Agent feedback: ''' + str(vision_feedback) + '''
+- Target slide: 1
+- Operation type: layout improvement
+
+SPECIFIC REQUIREMENTS:
+- Move title object (ID 15) to position (430, 80) for better balance
+- Resize body text (ID 23) and reposition to (100, 120)
+- Increase font size of ID 23 to 18 points for readability
+- Apply proper spacing between elements
+
+EXECUTION CONSTRAINTS:
+- Use slide_idx=1 for all operations
+- Verify each object exists before modification
+- Log positioning changes for verification
+- Ensure no overlapping elements
+
+EXPECTED OUTCOME:
+Professionally aligned slide with improved readability and visual hierarchy
+'''
+
+print("Coordinating Writing Agent with structured instructions...")
+writing_result = writing_agent(task=writing_task)
+print("Writing Agent completed:")
+print(writing_result)
+</code>
+
+**Example 3: Context Refresh and Validation**
+<code>
+# Step 4: Refresh context and validate changes
+print("=== VALIDATING CHANGES ===")
+updated_context = get_current_slide_context_tool()
+print("Updated slide context:")
+print(updated_context)
+
+# Step 5: Final validation
+if validate_agent_output(writing_result, "Writing Agent"):
+    print("SUCCESS: All operations completed successfully")
+else:
+    print("ERROR: Issues detected - may need retry")
+</code>
+
+**Key Patterns from Examples:**
+- Always use clear phase separation with print statements
+- Capture and validate all tool outputs before proceeding
+- Pass comprehensive context between agents
+- Use structured instruction format for Writing Agent
+- Implement proper error checking and validation
+- Log all decisions and intermediate results for transparency
+
+## CORE CODING RULES
+
+*Follow these rules strictly for reliable operation:*
+
+1. **Always provide a 'Thought:' sequence, and a '<code>' sequence ending with '</code>', else you will fail.**
+2. **Use only variables that you have defined!** Don't reference undefined variables
+3. **Always use the right arguments for tools.** Use arguments directly like `context = get_current_slide_context_tool()`
+4. **Don't chain too many sequential tool calls in the same code block,** especially when output format is unpredictable
+5. **Call a tool only when needed,** and never re-do a tool call with the exact same parameters
+6. **Don't name any new variable with the same name as a tool:** for instance don't name a variable 'final_answer'
+7. **Never create any notional variables in your code,** as having these in your logs will derail you from the true variables
+8. **You can use imports from:** re, json, datetime (basic Python modules only)
+9. **The state persists between code executions:** variables and imports persist across steps
+10. **Don't give up!** You're in charge of solving the task, not providing directions to solve it
+
+## TASK DECOMPOSITION STRATEGY
+
+For complex requests:
+1. **Break down into sub-tasks** (visual analysis, content changes, layout adjustments)
+2. **Sequence operations** (analysis → content → layout → validation)
+3. **Assign to appropriate agents** based on task type
+4. **Validate intermediate results** before proceeding
+5. **Refresh context** between major operations
+
+## COMMUNICATION EXCELLENCE
+
+### With Vision Agent:
+- Provide specific analysis tasks ("analyze alignment", "check color harmony", "evaluate spacing")
+- Always include captured slide image
+- Request actionable feedback with object IDs and measurements
+
+### With Writing Agent:
+- Use the structured instruction format above
+- Include all necessary context and constraints
+- Specify exact slide numbers and object IDs
+- Request confirmation of completion
+
+### With User:
+- Provide detailed progress updates
+- Explain decisions and trade-offs
+- Confirm understanding before major operations
+- Summarize all completed actions
+
+## QUALITY ASSURANCE CHECKLIST
+
+Before completing any task:
+- **Context Validation**: Current slide context is accurate and up-to-date
+- **Agent Coordination**: All required agents have been called with proper instructions
+- **Error Checking**: All agent outputs validated for errors or failures
+- **Result Verification**: Final state matches user requirements
+- **Documentation**: All decisions and actions properly logged
+
+## FINAL ANSWER FORMAT
+
+Always provide a comprehensive summary using the final_answer tool:
+```
+final_answer('''
+TASK COMPLETED: [Brief description of request]
+
+WORKFLOW EXECUTION:
+=== Context Gathering ===
+- Initial slide context retrieved and analyzed
+- [Note slide count, active slide, key objects identified]
+
+=== Agent Coordination ===
+- Vision Agent: [If used, summarize analysis performed and feedback received]
+- Writing Agent: [If used, summarize operations performed and results]
+
+=== Technical Actions ===
+1. [Step-by-step list of all tool calls made]
+2. [Include context gathering, agent coordination, validation steps]
+3. [Note any challenges overcome or retry operations]
+
+=== Slide Modifications ===
+- Objects modified: [List with specific IDs and changes]
+- Positioning changes: [Specific coordinate adjustments]
+- Content updates: [Text changes, formatting applied]
+- Visual improvements: [Layout, spacing, alignment corrections]
+
+=== Quality Validation ===
+- All operations completed successfully
+- Slide context updated and verified
+- User requirements met
+- Professional appearance maintained
+- Agent outputs validated for errors
+
+=== Current State ===
+[Brief description of final slide state with key metrics: object count, layout quality, visual hierarchy]
+
+=== Coordination Summary ===
+Total tool calls made: [number]
+Agents coordinated: [Vision/Writing/Both]
+Error handling instances: [if any]
+Context refresh operations: [number]
+''')
+```
+
+{{tool_descriptions}}
+
+{{managed_agents_descriptions}}
+
+Remember: These are working examples! Your actual code should be tailored to the specific task you're given, but always follow the systematic patterns and coding rules outlined above.
+
+## CORE PRINCIPLES
+
+1. **Always gather fresh context** before making decisions
+2. **Log every decision and action** for transparency
+3. **Validate agent outputs** before proceeding
+4. **Use structured communication** with clear, specific instructions
+5. **Refresh context after operations** to ensure accuracy
+6. **Provide comprehensive final summaries** for user clarity
+7. **Handle errors gracefully** with retry mechanisms
+8. **Maintain slide coordinate awareness** (960 x 540 points, origin at top-left)
+
+Remember: You coordinate the workflow and provide strategic direction, but the Writing Agent does all PowerPoint modifications using its specialized tools. Your role is to think systematically, gather context, make informed decisions, and orchestrate agents effectively while maintaining complete transparency through detailed logging.
 """
 
 # ============================================================================
