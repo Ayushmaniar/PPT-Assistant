@@ -106,18 +106,6 @@ def get_annotated_slide_image() -> Optional[Image.Image]:
 # ============================================================================
 
 @tool
-def get_current_slide_context_tool() -> str:
-    """
-    Get the current PowerPoint slide context including all objects, their properties, and layout information.
-    This provides essential context for understanding the current state of the slide.
-    
-    Returns:
-        str: Detailed slide context with object information, positions, and content
-    """
-    with trace_tool_call("get_current_slide_context_tool"):
-        return get_current_slide_context(force_refresh=True)
-
-@tool
 def get_annotated_slide_image_tool() -> Optional[Image.Image]:
     """
     Get the current slide as an annotated PIL Image for vision analysis.
@@ -190,6 +178,17 @@ def _get_shape_type_name(shape_type: int) -> str:
 # ============================================================================
 # ALL POWERPOINT MANIPULATION TOOLS (for Writing Agent)
 # ============================================================================
+
+# Import the new consolidated tools from ppt_smolagent
+from ppt_smolagent import (
+    add_textbox,
+    update_textbox,
+    format_textbox_style,
+    position_object,
+    duplicate_object,
+    get_object_properties,
+    delete_object
+)
 
 # Import all the existing PowerPoint tools from the original file
 # We'll copy them here to ensure the Writing Agent has access to all of them
@@ -1086,15 +1085,11 @@ class MultiAgentPPTSystem:
             model=writing_model,
             tools=[
                 add_textbox,
-                replace_textbox_content,
-                modify_text_in_textbox,
-                add_text_to_textbox,
+                update_textbox,
                 format_textbox_style,
-                move_object,
-                resize_object,
-                position_and_resize_object,
-                copy_object_to_slide,
-                duplicate_object_on_same_slide,
+                position_object,
+                duplicate_object,
+                get_object_properties,
                 delete_object
             ],
             instructions=writing_agent_instructions,
@@ -1108,7 +1103,6 @@ class MultiAgentPPTSystem:
         self.manager_agent = CodeAgent(
             model=manager_model,
             tools=[
-                get_current_slide_context_tool,
                 get_object_properties,
                 get_annotated_slide_image_tool
             ],
@@ -1148,7 +1142,6 @@ class MultiAgentPPTSystem:
     3. Execute any required PowerPoint modifications through the Writing Agent
     4. Provide a comprehensive response to the user
 
-    Remember: You have access to get_current_slide_context_tool() and get_object_properties() for context gathering.
     The Vision Agent can analyze slide visuals, and the Writing Agent can execute all PowerPoint operations.
     """
                     

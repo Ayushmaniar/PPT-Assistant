@@ -610,9 +610,94 @@ def _update_textbox_internal(id: int, html_text: str = None, text_operation: str
 # Universal object manipulation tools
 
 @tool
-def move_object(id: int, left: int, top: int) -> str:
+def update_textbox(id: int, html_text: str = None, operation: str = "replace", find_pattern: str = None, replacement_text: str = None, regex_flags: str = "IGNORECASE", font_size: int = None, font_name: str = None, text_align: str = None) -> str:
     """
-    Move any object (textbox, shape, image, etc.) to new coordinates on the slide.
+    Versatile tool to update text in a textbox with multiple operation modes.
+    
+    Operation modes:
+    - "replace": Replace ALL text with new HTML-formatted content (default)
+    - "append": Add new text at the END of existing text
+    - "prepend": Add new text at the BEGINNING of existing text
+    - "find_replace": Find and replace specific text patterns using regex
+    
+    HTML Syntax Supported:
+        <b>bold text</b> or <strong>bold text</strong> - Bold formatting
+        <i>italic text</i> or <em>italic text</em> - Italic formatting
+        <s>strikethrough</s> or <del>strikethrough</del> - Strikethrough formatting
+        <u>underlined</u> - Underlined text
+        <span style="color: red">colored text</span> - Colored text (hex #FF0000 or names)
+        <span style="background-color: yellow">highlighted</span> - Background color
+        <ul><li>bullet point</li></ul> - Bullet lists
+        <ol><li>numbered item</li></ol> - Numbered lists
+        <h1>Header 1</h1>, <h2>Header 2</h2>, <h3>Header 3</h3> - Headers
+    
+    Args:
+        id: The ID of the textbox to update
+        html_text: HTML-formatted text content (used for replace/append/prepend)
+        operation: How to apply the text - "replace", "append", "prepend", or "find_replace"
+        find_pattern: Text pattern to find (only used with operation="find_replace")
+        replacement_text: HTML text to replace matches with (only used with operation="find_replace")
+        regex_flags: Regex flags like "IGNORECASE" (default: "IGNORECASE")
+        font_size: Base font size in points (headers will be larger)
+        font_name: Font name for the text
+        text_align: Text alignment - "left", "center", "right", or "justify"
+    
+    Returns:
+        str: Confirmation message with details of what was updated
+    """
+    # Ensure operation is lowercase
+    operation = operation.lower()
+    
+    # Map operations to internal text_operation values
+    text_operation_map = {
+        "replace": "replace",
+        "append": "append",
+        "prepend": "prepend",
+        "find_replace": "regex"
+    }
+    
+    # Set text_operation to the mapped value, defaulting to "replace"
+    text_operation = text_operation_map.get(operation, "replace")
+    
+    # Call the internal implementation based on operation type
+    if operation == "find_replace":
+        if not find_pattern:
+            return "ERROR: When using operation='find_replace', you must provide the find_pattern parameter"
+        if not replacement_text:
+            return "ERROR: When using operation='find_replace', you must provide the replacement_text parameter"
+            
+        return _update_textbox_internal(
+            id=id,
+            regex_finder=find_pattern,
+            replacement_text=replacement_text,
+            regex_flags=regex_flags,
+            font_size=font_size,
+            font_name=font_name,
+            text_align=text_align
+        )
+    else:
+        # For replace, append, prepend operations
+        if not html_text:
+            return f"ERROR: When using operation='{operation}', you must provide the html_text parameter"
+            
+        return _update_textbox_internal(
+            id=id,
+            html_text=html_text,
+            text_operation=text_operation,
+            font_size=font_size,
+            font_name=font_name,
+            text_align=text_align
+        )
+
+@tool
+def position_object(id: int, left: int = None, top: int = None, width: int = None, height: int = None) -> str:
+    """
+    Position and/or resize any object on the slide with flexible options.
+    
+    This is a versatile tool that can:
+    1. Move an object (provide only left/top)
+    2. Resize an object (provide only width/height)
+    3. Both move and resize (provide all parameters)
     
     The slide coordinate system:
     - Origin (0, 0) is at the top-left corner
@@ -620,12 +705,14 @@ def move_object(id: int, left: int, top: int) -> str:
     - Measurements are in points (72 points = 1 inch)
     
     Args:
-        id: The ID of the object to move
-        left: Distance from left edge of slide in points (0-960 for standard slide)
-        top: Distance from top edge of slide in points (0-540 for standard slide)
+        id: The ID of the object to modify
+        left: Optional - New distance from left edge of slide in points
+        top: Optional - New distance from top edge of slide in points
+        width: Optional - New width in points
+        height: Optional - New height in points
     
     Returns:
-        str: Confirmation message with the object's new position
+        str: Confirmation message with the object's new position and/or size
     """
     pythoncom.CoInitialize()
     try:
@@ -634,56 +721,142 @@ def move_object(id: int, left: int, top: int) -> str:
         for slide in presentation.Slides:
             for shape in slide.Shapes:
                 if shape.Id == id:
-                    shape.Left = left
-                    shape.Top = top
-                    return f"Moved object {id} to position ({left}, {top}) on slide {slide.SlideIndex}"
+                    changes = []
+                    
+                    # Apply position changes if specified
+                    if left is not None:
+                        shape.Left = left
+                        changes.append(f"left to {left}")
+                    if top is not None:
+                        shape.Top = top
+                        changes.append(f"top to {top}")
+                        
+                    # Apply size changes if specified
+                    if width is not None:
+                        shape.Width = width
+                        changes.append(f"width to {width}")
+                    if height is not None:
+                        shape.Height = height
+                        changes.append(f"height to {height}")
+                    
+                    # Build appropriate response based on what changed
+                    if not changes:
+                        return f"No changes specified for object {id}"
+                    else:
+                        action = "Positioned" if (left is not None or top is not None) else ""
+                        action = "Resized" if action == "" and (width is not None or height is not None) else action
+                        action = "Positioned and resized" if (left is not None or top is not None) and (width is not None or height is not None) else action
+                        return f"{action} object {id} on slide {slide.SlideIndex}: set " + ", ".join(changes)
+                        
         return f"Object with ID {id} not found"
     except Exception as e:
-        return f"Error moving object {id}: {str(e)}"
+        return f"Error modifying object {id}: {str(e)}"
 
 @tool
-def resize_object(id: int, width: int, height: int) -> str:
+def duplicate_object(id: int, target_slide_idx: int = None, left: int = None, top: int = None, offset_left: int = 20, offset_top: int = 20) -> int:
     """
-    Change the size of any object (textbox, shape, image, etc.) to new dimensions.
+    Create a duplicate of an object on the same or different slide.
+    
+    This versatile tool can:
+    1. Duplicate on same slide with slight offset (default behavior)
+    2. Copy to another slide at original position (specify target_slide_idx only)
+    3. Copy to another slide at new position (specify target_slide_idx and left/top)
+    4. Duplicate on same slide at specific position (specify left/top)
     
     Args:
-        id: The ID of the object to resize
-        width: New width in points
-        height: New height in points
+        id: The ID of the object to duplicate
+        target_slide_idx: Optional slide number to copy to (if None, uses current slide)
+        left: Optional specific left position for the copy
+        top: Optional specific top position for the copy
+        offset_left: How many points to offset if left not specified (default: 20)
+        offset_top: How many points to offset if top not specified (default: 20)
     
     Returns:
-        str: Confirmation message with the object's new dimensions
+        int: The ID of the newly created duplicate, or -1 if operation failed
     """
     pythoncom.CoInitialize()
     try:
         ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
         presentation = ppt_app.ActivePresentation
+        
+        # Find source object and its slide
+        source_shape = None
+        source_slide = None
         for slide in presentation.Slides:
             for shape in slide.Shapes:
                 if shape.Id == id:
-                    shape.Width = width
-                    shape.Height = height
-                    return f"Resized object {id} to {width}×{height} points on slide {slide.SlideIndex}"
-        return f"Object with ID {id} not found"
+                    source_shape = shape
+                    source_slide = slide
+                    break
+            if source_shape:
+                break
+        
+        if not source_shape:
+            return -1
+            
+        # Determine if we're duplicating on same slide or copying to a different slide
+        if target_slide_idx is None or target_slide_idx == source_slide.SlideIndex:
+            # Same-slide duplication
+            dup = source_shape.Duplicate()
+            if dup and dup.Count > 0:
+                new_shape = dup[0]
+                
+                # Set position with either specific coordinates or offset
+                if left is not None:
+                    new_shape.Left = left
+                else:
+                    new_shape.Left = source_shape.Left + offset_left
+                    
+                if top is not None:
+                    new_shape.Top = top
+                else:
+                    new_shape.Top = source_shape.Top + offset_top
+                    
+                return new_shape.Id
+            else:
+                return -1
+        else:
+            # Cross-slide copying
+            # Create target slide if needed
+            if presentation.Slides.Count < target_slide_idx:
+                target_slide = presentation.Slides.Add(target_slide_idx, 12)  # 12 = ppLayoutBlank
+            else:
+                target_slide = presentation.Slides(target_slide_idx)
+            
+            # Copy and paste
+            source_shape.Copy()
+            pasted = target_slide.Shapes.Paste()
+            
+            if pasted and pasted.Count > 0:
+                new_shape = pasted[0]
+                new_id = new_shape.Id
+                
+                # Position the copy if coordinates specified
+                if left is not None:
+                    new_shape.Left = left
+                if top is not None:
+                    new_shape.Top = top
+                
+                return new_id
+            else:
+                return -1
+            
     except Exception as e:
-        return f"Error resizing object {id}: {str(e)}"
+        print(f"Error duplicating object {id}: {str(e)}")
+        return -1
 
 @tool
-def position_and_resize_object(id: int, left: int, top: int, width: int, height: int) -> str:
+def delete_object(id: int) -> str:
     """
-    Move and resize an object in a single operation for precise positioning.
+    Permanently delete an object from the slide.
     
-    Useful when you need to set both position and size to avoid multiple operations.
+    ⚠️ WARNING: This action cannot be undone programmatically.
     
     Args:
-        id: The ID of the object to position and resize
-        left: Distance from left edge of slide in points
-        top: Distance from top edge of slide in points
-        width: New width in points
-        height: New height in points
+        id: The ID of the object to delete
     
     Returns:
-        str: Confirmation message with the object's new position and size
+        str: Confirmation message of deletion
     """
     pythoncom.CoInitialize()
     try:
@@ -692,15 +865,22 @@ def position_and_resize_object(id: int, left: int, top: int, width: int, height:
         for slide in presentation.Slides:
             for shape in slide.Shapes:
                 if shape.Id == id:
-                    shape.Left = left
-                    shape.Top = top
-                    shape.Width = width
-                    shape.Height = height
-                    return f"Positioned object {id} at ({left}, {top}) with size {width}×{height} on slide {slide.SlideIndex}"
+                    shape_name = shape.Name
+                    slide_num = slide.SlideIndex
+                    shape.Delete()
+                    
+                    # Clear slide context cache after deletion
+                    try:
+                        reader = get_slide_reader()
+                        if reader:
+                            reader.clear_context_cache()
+                    except Exception:
+                        pass
+                    
+                    return f"Deleted object '{shape_name}' (ID: {id}) from slide {slide_num}"
         return f"Object with ID {id} not found"
     except Exception as e:
-        return f"Error positioning object {id}: {str(e)}"
-
+        return f"Error deleting object {id}: {str(e)}"
 
 @tool
 def get_object_properties(id: int) -> dict:
@@ -762,153 +942,6 @@ def _get_shape_type_name(shape_type: int) -> str:
     }
     return type_map.get(shape_type, f"Unknown({shape_type})")
 
-@tool
-def copy_object_to_slide(id: int, target_slide_idx: int, new_left: int = None, new_top: int = None) -> int:
-    """
-    Copy an object to another slide, optionally positioning it at specific coordinates.
-    
-    The original object remains unchanged. A new copy is created on the target slide.
-    
-    Args:
-        id: The ID of the object to copy
-        target_slide_idx: Slide number to copy the object to (1-indexed)
-        new_left: Optional new left position for the copy (preserves original position if not specified)
-        new_top: Optional new top position for the copy (preserves original position if not specified)
-    
-    Returns:
-        int: The ID of the newly created copy, or -1 if operation failed
-    """
-    pythoncom.CoInitialize()
-    try:
-        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
-        presentation = ppt_app.ActivePresentation
-        
-        # Find source object
-        source_shape = None
-        for slide in presentation.Slides:
-            for shape in slide.Shapes:
-                if shape.Id == id:
-                    source_shape = shape
-                    break
-            if source_shape:
-                break
-        
-        if not source_shape:
-            return -1
-        
-        # Create target slide if needed
-        if presentation.Slides.Count < target_slide_idx:
-            target_slide = presentation.Slides.Add(target_slide_idx, 12)  # 12 = ppLayoutBlank
-        else:
-            target_slide = presentation.Slides(target_slide_idx)
-        
-        # Copy and paste
-        source_shape.Copy()
-        pasted = target_slide.Shapes.Paste()
-        
-        if pasted and pasted.Count > 0:
-            new_shape = pasted[0]
-            new_id = new_shape.Id
-            
-            # Position the copy if coordinates specified
-            if new_left is not None:
-                new_shape.Left = new_left
-            if new_top is not None:
-                new_shape.Top = new_top
-            
-            return new_id
-        else:
-            return -1
-            
-    except Exception as e:
-        print(f"Error copying object {id}: {str(e)}")
-        return -1
-
-@tool
-def duplicate_object_on_same_slide(id: int, offset_left: int = 20, offset_top: int = 20) -> int:
-    """
-    Create a duplicate of an object on the same slide with a slight position offset.
-    
-    Useful for creating multiple similar objects quickly.
-    
-    Args:
-        id: The ID of the object to duplicate
-        offset_left: How many points to move the duplicate to the right (default: 20)
-        offset_top: How many points to move the duplicate down (default: 20)
-    
-    Returns:
-        int: The ID of the newly created duplicate, or -1 if operation failed
-    """
-    pythoncom.CoInitialize()
-    try:
-        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
-        presentation = ppt_app.ActivePresentation
-        
-        # Find source object
-        source_shape = None
-        for slide in presentation.Slides:
-            for shape in slide.Shapes:
-                if shape.Id == id:
-                    source_shape = shape
-                    break
-            if source_shape:
-                break
-        
-        if not source_shape:
-            return -1
-        
-        # Duplicate on same slide
-        dup = source_shape.Duplicate()
-        if dup and dup.Count > 0:
-            new_shape = dup[0]
-            # Offset the position slightly
-            new_shape.Left = source_shape.Left + offset_left
-            new_shape.Top = source_shape.Top + offset_top
-            return new_shape.Id
-        else:
-            return -1
-            
-    except Exception as e:
-        print(f"Error duplicating object {id}: {str(e)}")
-        return -1
-
-@tool
-def delete_object(id: int) -> str:
-    """
-    Permanently delete an object from the slide.
-    
-    ⚠️ WARNING: This action cannot be undone programmatically.
-    
-    Args:
-        id: The ID of the object to delete
-    
-    Returns:
-        str: Confirmation message of deletion
-    """
-    pythoncom.CoInitialize()
-    try:
-        ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
-        presentation = ppt_app.ActivePresentation
-        for slide in presentation.Slides:
-            for shape in slide.Shapes:
-                if shape.Id == id:
-                    shape_name = shape.Name
-                    slide_num = slide.SlideIndex
-                    shape.Delete()
-                    
-                    # Clear slide context cache after deletion
-                    try:
-                        reader = get_slide_reader()
-                        if reader:
-                            reader.clear_context_cache()
-                    except Exception:
-                        pass
-                    
-                    return f"Deleted object '{shape_name}' (ID: {id}) from slide {slide_num}"
-        return f"Object with ID {id} not found"
-    except Exception as e:
-        return f"Error deleting object {id}: {str(e)}"
-
 # The tool is automatically registered when using the @tool decorator
 
 instructions = """
@@ -929,7 +962,7 @@ When an image of the slide is provided, you can:
 
 The image provides visual context to enhance your tool usage decisions.
 
-USE THIS CONTEXT in your THOUGHT process to make informed decisions about positioning, styling, and content placement.
+USE THIS CONTEXT in YOUR THOUGHT process to make informed decisions about positioning, styling, and content placement.
 
 📝 TEXT EDITING TOOLS - Choose the RIGHT tool for the task:
 
@@ -1009,16 +1042,11 @@ def get_current_slide_context(force_refresh=False):
 agent = CodeAgent(
     tools=[
         add_textbox,
-        replace_textbox_content,
-        modify_text_in_textbox,
-        add_text_to_textbox,
+        update_textbox,
         format_textbox_style,
-        move_object,
-        resize_object,
-        position_and_resize_object,
+        position_object,
+        duplicate_object,
         get_object_properties,
-        copy_object_to_slide,
-        duplicate_object_on_same_slide,
         delete_object
     ],
     instructions=instructions,
@@ -1040,6 +1068,52 @@ def strip_ansi_codes(text):
     text = color_codes.sub('', text)
     
     return text
+
+def _legacy_run_agent_with_code_capture(message, images=None):
+    """
+    Legacy single-agent implementation for backwards compatibility.
+    Automatically includes current slide context in the message.
+    
+    Args:
+        message (str): The user's message/request
+        images (list[PIL.Image.Image], optional): List of PIL Image objects to pass to the agent
+    
+    Returns:
+        dict: Contains 'answer', 'generated_code', and 'slide_context' keys
+    """
+    # Set up logging to capture the agent's output
+    code_capture_handler.clear()
+    logger = logging.getLogger()
+    logger.addHandler(code_capture_handler)
+    
+    # Get current slide context
+    slide_context = get_current_slide_context()
+    
+    # Enhance the message with slide context
+    enhanced_message = f"""CURRENT SLIDE CONTEXT:
+{slide_context}
+
+USER REQUEST:
+{message}
+"""
+    
+    # Run the agent
+    answer = agent.run(enhanced_message, images=images)
+    
+    # Clean the answer
+    clean_answer = strip_ansi_codes(answer) if answer else "Operation completed"
+    
+    # Get the captured code
+    captured_code = strip_ansi_codes(code_capture_handler.get_code())
+    
+    # Remove the handler to avoid duplicated logs
+    logger.removeHandler(code_capture_handler)
+    
+    return {
+        'answer': clean_answer,
+        'generated_code': captured_code,
+        'slide_context': slide_context
+    }
 
 def run_agent_with_code_capture(message, images=None):
     """
@@ -1063,208 +1137,26 @@ def run_agent_with_code_capture(message, images=None):
         # Fallback to legacy system if multi-agent is not available
         return _legacy_run_agent_with_code_capture(message, images)
 
-def _legacy_run_agent_with_code_capture(message, images=None):
-    """
-    Legacy single-agent implementation for backwards compatibility.
-    Automatically includes current slide context in the message.
+# Add a simple CLI interface
+if __name__ == "__main__":
+    import sys
     
-    Args:
-        message (str): The user's message/request
-        images (list[PIL.Image.Image], optional): List of PIL Image objects to pass to the agent
-    
-    Returns:
-        dict: Contains 'answer', 'generated_code', and 'slide_context' keys
-    """
-    # Trace the entire agent interaction
-    with trace_tool_call("agent_interaction", user_message=message[:100]):
-        try:
-            add_trace_event("agent_start", user_message=message)
-            
-            # Get current slide context
-            add_trace_event("context_retrieval", action="getting_slide_context")
-            slide_context = get_current_slide_context()
-            
-            # Debug: Print current slide info (you can remove this later)
-            if "Slide:" in slide_context:
-                slide_line = [line for line in slide_context.split('\n') if line.startswith('Slide:')]
-                if slide_line:
-                    print(f"🎯 Current slide context: {slide_line[0]}")
-            
-            # Handle message construction differently based on whether images are provided
-            if images:
-                # When images are provided, enhance the prompt but keep it focused on tool usage
-                enhanced_message = f"""CURRENT SLIDE CONTEXT:
-{slide_context}
-
-VISUAL INFORMATION: You can see the current slide image which shows the visual layout with green bounding boxes around objects and yellow ID labels (e.g., "ID:29"). Use this visual information along with the slide context data to make informed decisions about object positioning and modifications.
-
-USER REQUEST:
-{message}
-
-Note: Focus on using the available PowerPoint tools to fulfill the user's request. The visual information helps you understand the current layout."""
-            else:
-                # When no images, use the original approach
-                enhanced_message = f"""CURRENT SLIDE CONTEXT:
-{slide_context}
-
-USER REQUEST:
-{message}
-"""
-            
-            # Clear previous captured code
-            code_capture_handler.clear()
-            
-            # Set up logging to capture the agent's output
-            logger = logging.getLogger()
-            logger.addHandler(code_capture_handler)
-            logger.setLevel(logging.DEBUG)
-            
-            # Capture stdout/stderr as well
-            stdout_backup = sys.stdout
-            stderr_backup = sys.stderr
-            stdout_capture = io.StringIO()
-            stderr_capture = io.StringIO()
-            
-            try:
-                sys.stdout = stdout_capture
-                sys.stderr = stderr_capture
-                
-                # Run the agent with enhanced message
-                add_trace_event("agent_execution", action="running_smolagent", enhanced_message_length=len(enhanced_message))
-                if images:
-                    add_trace_event("agent_with_images", num_images=len(images))
-                    answer = agent.run(enhanced_message, images=images)
-                else:
-                    answer = agent.run(enhanced_message)
-                add_trace_event("agent_response", answer_length=len(answer) if answer else 0)
-                
-            finally:
-                # Restore stdout/stderr
-                sys.stdout = stdout_backup
-                sys.stderr = stderr_backup
-                logger.removeHandler(code_capture_handler)
-            
-            # Get captured outputs and clean them
-            stdout_content = strip_ansi_codes(stdout_capture.getvalue())
-            stderr_content = strip_ansi_codes(stderr_capture.getvalue())
-            captured_code = strip_ansi_codes(code_capture_handler.get_code())
-            
-            # IMPORTANT: Force refresh the slide context after agent execution
-            # This ensures that any objects added/deleted by the agent are reflected in the context
-            try:
-                add_trace_event("context_refresh", action="refreshing_slide_context")
-                reader = get_slide_reader()
-                if reader and reader.ppt_app:
-                    # Force refresh the context to reflect any changes made by the agent
-                    updated_context = reader.force_refresh_context()
-                    print("✅ Slide context refreshed after agent execution")
-                else:
-                    updated_context = slide_context
-            except Exception as e:
-                print(f"⚠️ Warning: Could not refresh context after execution: {e}")
-                updated_context = slide_context
-            
-            # Try to extract code from various sources
-            generated_code = ""
-            
-            # First, try the captured code from logs
-            if captured_code.strip():
-                generated_code = captured_code
-            
-            # Next, try to extract from stdout
-            elif stdout_content:
-                # Look for code patterns in stdout
-                import re
-                
-                # Look for function definitions and imports
-                code_patterns = [
-                    r'(def\s+\w+.*?(?=\n\w|\n$))',  # Function definitions
-                    r'(import\s+\w+.*)',  # Import statements
-                    r'(from\s+\w+.*)',  # From imports
-                    r'(\w+\s*=\s*.*)',  # Assignments
-                ]
-                
-                for pattern in code_patterns:
-                    matches = re.findall(pattern, stdout_content, re.MULTILINE | re.DOTALL)
-                    if matches:
-                        generated_code += '\n'.join(matches) + '\n'
-            
-            # If still no code, try to extract from the answer itself
-            if not generated_code.strip():
-                import re
-                # Clean the answer first
-                clean_answer = strip_ansi_codes(answer)
-                
-                # Look for code blocks in the answer
-                code_blocks = re.findall(r'```(?:python)?\n?(.*?)\n?```', clean_answer, re.DOTALL)
-                if code_blocks:
-                    generated_code = '\n'.join(code_blocks)
-                else:
-                    # Look for Python-like statements in the answer
-                    lines = clean_answer.split('\n')
-                    code_lines = []
-                    for line in lines:
-                        stripped = line.strip()
-                        if any(keyword in stripped for keyword in ['def ', 'import ', 'from ', '=', 'print(', 'if ', 'for ', 'with ', 'try:']):
-                            code_lines.append(line)
-                    if code_lines:
-                        generated_code = '\n'.join(code_lines)
-            
-            # Fallback message if no code was captured
-            if not generated_code.strip():
-                # Create a summary based on the tool that was likely used
-                if "textbox" in message.lower() or "add" in message.lower():
-                    tool_name = "add_textbox_tool"
-                else:
-                    tool_name = "PowerPoint automation tool"
-                    
-                generated_code = f"""# Agent Execution Summary
-# Request: "{message}"
-# 
-# The agent executed your request using the {tool_name}().
-# This is a direct tool call that doesn't require custom code generation.
-#
-# The operation was completed successfully using the built-in PowerPoint COM interface.
-# 
-# Available tools:
-# - add_textbox_tool: Create textboxes with formatting options
-# 
-# Example of what the agent did internally:
-import win32com.client
-import pythoncom
-
-# Initialize PowerPoint COM interface
-pythoncom.CoInitialize()
-ppt_app = win32com.client.GetActiveObject("PowerPoint.Application")
-presentation = ppt_app.ActivePresentation
-
-# Tool executed with your parameters
-# Result: {strip_ansi_codes(answer) if answer else 'Operation completed'}"""
-            
-            # Clean the final answer
-            clean_answer = strip_ansi_codes(answer) if answer else "Operation completed"
-            
-            add_trace_event("agent_completed", 
-                success=True, 
-                answer_length=len(clean_answer),
-                code_generated=bool(generated_code.strip()),
-                context_updated=bool(updated_context != slide_context)
-            )
-            
-            return {
-                'answer': clean_answer,
-                'generated_code': generated_code,
-                'slide_context': updated_context,
-                'debug_output': f"STDOUT:\n{stdout_content}\n\nSTDERR:\n{stderr_content}"
-            }
-            
-        except Exception as e:
-            add_trace_event("agent_error", error=str(e), error_type=type(e).__name__)
-            return {
-                'answer': f"Error: {str(e)}",
-                'generated_code': f"# Error occurred during execution:\n# {str(e)}\n\n# This might be due to:\n# - Missing dependencies\n# - PowerPoint not running\n# - Invalid parameters",
-                'slide_context': "Error reading slide context",
-                'debug_output': str(e)
-            }
+    # If command line arguments are provided, use them as the query
+    if len(sys.argv) > 1:
+        # Join all arguments to form the query
+        query = " ".join(sys.argv[1:])
+        print(f"Running agent with query: {query}")
+        result = run_agent_with_code_capture(query)
+        print("\nANSWER:")
+        print(result['answer'])
+        
+        # Optionally show generated code with --verbose flag
+        if "--verbose" in sys.argv or "-v" in sys.argv:
+            print("\nGENERATED CODE:")
+            print(result['generated_code'])
+    else:
+        print("Usage: uv run python ppt_smolagent.py \"your query here\" [--verbose|-v]")
+        print("\nExample: uv run python ppt_smolagent.py \"Add a textbox that says Hello World\"")
+        print("Example with code output: uv run python ppt_smolagent.py \"Add a textbox\" --verbose")
 
 
